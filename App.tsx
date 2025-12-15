@@ -15,7 +15,17 @@ const App: React.FC = () => {
   const [currentConfig, setCurrentConfig] = useState<GameConfig | null>(null);
   const [highScore, setHighScore] = useState<number>(0);
   const [isNewHighScore, setIsNewHighScore] = useState<boolean>(false);
-  const [userData, setUserData] = useState<{name: string, grade: string} | null>(null);
+  
+  // Initialize user data from localStorage if available
+  const [userData, setUserData] = useState<{name: string, grade: string} | null>(() => {
+    try {
+      const saved = localStorage.getItem('mathGeniusUserData');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      console.error("Failed to parse user data", e);
+      return null;
+    }
+  });
 
   useEffect(() => {
     const savedScore = localStorage.getItem('mathGeniusHighScore');
@@ -25,7 +35,9 @@ const App: React.FC = () => {
   }, []);
 
   const handleUserEntry = (name: string, grade: string) => {
-    setUserData({ name, grade });
+    const data = { name, grade };
+    setUserData(data);
+    localStorage.setItem('mathGeniusUserData', JSON.stringify(data));
   };
 
   const handleStartGame = (config: GameConfig) => {
