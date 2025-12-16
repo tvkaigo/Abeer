@@ -1,10 +1,9 @@
 import { UserStats, GameResult, LeaderboardEntry } from '../types';
 
-// Using a public KVDB bucket for demo purposes to allow cross-device sync.
-// In a real production app, this should be a secure backend API.
-const CLOUD_API_URL = 'https://kvdb.io/beta/math-genius-app-public-db';
+// Unique bucket ID for this specific app instance to ensure all users share the same data
+const CLOUD_API_URL = 'https://kvdb.io/beta/math-genius-live-v1';
 const USER_STATS_PREFIX = 'stats_';
-const LEADERBOARD_KEY = 'leaderboard_v3';
+const LEADERBOARD_KEY = 'leaderboard_global_v1';
 
 const getTodayDateString = (): string => {
   return new Date().toISOString().split('T')[0];
@@ -22,7 +21,8 @@ export const getInitialStats = (): UserStats => ({
 
 const fetchFromCloud = async <T>(key: string): Promise<T | null> => {
   try {
-    const response = await fetch(`${CLOUD_API_URL}/${key}`);
+    // Add timestamp to prevent caching
+    const response = await fetch(`${CLOUD_API_URL}/${key}?t=${Date.now()}`);
     if (response.status === 404) return null;
     if (!response.ok) throw new Error('Network response was not ok');
     return await response.json();
@@ -35,7 +35,7 @@ const fetchFromCloud = async <T>(key: string): Promise<T | null> => {
 const saveToCloud = async (key: string, data: any): Promise<void> => {
   try {
     await fetch(`${CLOUD_API_URL}/${key}`, {
-      method: 'POST', // KVDB uses POST to update/create
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
@@ -49,15 +49,14 @@ const saveToCloud = async (key: string, data: any): Promise<void> => {
 export const loadStats = async (username: string): Promise<UserStats> => {
   if (!username) return getInitialStats();
   
-  // 1. Try Cloud
+  // 1. Try Cloud first (Source of Truth)
   const cloudStats = await fetchFromCloud<UserStats>(`${USER_STATS_PREFIX}${username}`);
   if (cloudStats) {
-    // Update local cache
     localStorage.setItem(`${USER_STATS_PREFIX}${username}`, JSON.stringify(cloudStats));
     return cloudStats;
   }
 
-  // 2. Fallback to Local
+  // 2. Fallback to Local if cloud fails or doesn't exist
   try {
     const local = localStorage.getItem(`${USER_STATS_PREFIX}${username}`);
     if (local) return JSON.parse(local);
@@ -71,7 +70,7 @@ export const loadStats = async (username: string): Promise<UserStats> => {
 export const updateUserStats = async (result: GameResult, username: string): Promise<UserStats> => {
   if (!username) return getInitialStats();
 
-  // Load current stats (awaiting ensures we have latest)
+  // Load latest stats from cloud before updating
   const stats = await loadStats(username);
   
   const today = getTodayDateString();
@@ -90,11 +89,11 @@ export const updateUserStats = async (result: GameResult, username: string): Pro
   } else if (stats.lastPlayedDate === yesterday) {
     stats.streak += 1;
   } else {
-    // Only reset if missed a day (and played before)
+    // Check if it's not the very first game
     if (stats.lastPlayedDate) {
         stats.streak = 1;
     } else {
-        stats.streak = 1; // First game ever
+        stats.streak = 1; 
     }
   }
   stats.lastPlayedDate = today;
@@ -111,7 +110,7 @@ export const updateUserStats = async (result: GameResult, username: string): Pro
   localStorage.setItem(`${USER_STATS_PREFIX}${username}`, JSON.stringify(stats));
   await saveToCloud(`${USER_STATS_PREFIX}${username}`, stats);
 
-  // 5. Trigger Leaderboard Update
+  // 5. Trigger Leaderboard Update immediately
   await updateLeaderboard(username, "-", stats.totalCorrect);
 
   return stats;
@@ -119,7 +118,7 @@ export const updateUserStats = async (result: GameResult, username: string): Pro
 
 // --- Leaderboard Logic ---
 
-export const getLeaderboard = async (): Promise<LeaderboardEntry[]> => {
+export const getLeaderboard = async (skipCache: boolean = false): Promise<LeaderboardEntry[]> => {
   // 1. Try Cloud
   const cloudData = await fetchFromCloud<LeaderboardEntry[]>(LEADERBOARD_KEY);
   if (cloudData) {
@@ -127,26 +126,32 @@ export const getLeaderboard = async (): Promise<LeaderboardEntry[]> => {
     return cloudData;
   }
 
-  // 2. Fallback Local
-  try {
-    const local = localStorage.getItem(LEADERBOARD_KEY);
-    if (local) return JSON.parse(local);
-  } catch (e) {
-    console.error("Local leaderboard load failed", e);
+  // 2. Fallback Local (only if not skipping cache)
+  if (!skipCache) {
+      try {
+        const local = localStorage.getItem(LEADERBOARD_KEY);
+        if (local) return JSON.parse(local);
+      } catch (e) {
+        console.error("Local leaderboard load failed", e);
+      }
   }
   return [];
 };
 
 export const registerNewPlayer = async (name: string, grade: string) => {
-  // Check if player exists in stats to carry over score
+  // Always load stats from cloud to ensure we have the real totalCorrect
+  // This handles the case where a user plays on Device A, then logs in on Device B.
   const stats = await loadStats(name);
+  
+  // Update the leaderboard with their current stats (even if 0)
   await updateLeaderboard(name, grade, stats.totalCorrect);
 };
 
 export const updateLeaderboard = async (name: string, grade: string, totalCorrect: number) => {
   try {
-    // 1. Get current list (prefer cloud)
-    let currentList = await getLeaderboard();
+    // 1. Fetch Fresh Leaderboard from Cloud
+    // We try to get the absolute latest to avoid overwriting others
+    let currentList = await getLeaderboard(true) || [];
     
     // 2. Calculate badges
     const badgesCount = getBadgeStatus(totalCorrect).filter(b => b.unlocked).length;
@@ -163,19 +168,20 @@ export const updateLeaderboard = async (name: string, grade: string, totalCorrec
     };
     
     if (existingIndex >= 0) {
-      // Update
+      // Update existing entry
       currentList[existingIndex] = newEntry;
     } else {
-      // Add
+      // Add new entry
       currentList.push(newEntry);
     }
 
-    // 3. Sort
+    // 3. Sort by Score
     const sortedList = currentList.sort((a, b) => b.totalCorrect - a.totalCorrect);
 
-    // 4. Save Cloud & Local
-    localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(sortedList));
+    // 4. Save back to Cloud
     await saveToCloud(LEADERBOARD_KEY, sortedList);
+    // Also save local
+    localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(sortedList));
 
     return sortedList;
   } catch (e) {

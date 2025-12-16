@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Home, Trophy, Medal, Crown, Sparkles, Loader2 } from 'lucide-react';
+import React, { useEffect, useState, useCallback } from 'react';
+import { Home, Trophy, Medal, Crown, Sparkles, Loader2, RefreshCw } from 'lucide-react';
 import { getLeaderboard, getBadgeStatus } from '../services/statsService';
 import { LeaderboardEntry } from '../types';
 
@@ -11,23 +11,29 @@ interface LeaderboardScreenProps {
 const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUser }) => {
   const [leaders, setLeaders] = useState<LeaderboardEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const fetchLeaders = useCallback(async (showLoader = true) => {
+    if (showLoader) setIsRefreshing(true);
+    const data = await getLeaderboard(true); // Force fetch from cloud
+    setLeaders(data);
+    setIsLoading(false);
+    if (showLoader) setIsRefreshing(false);
+  }, []);
 
   useEffect(() => {
-    const fetchLeaders = async () => {
-        setIsLoading(true);
-        const data = await getLeaderboard();
-        setLeaders(data);
-        setIsLoading(false);
-    };
-    fetchLeaders();
+    fetchLeaders(false); // Initial load
     
-    // Optional: Poll for updates every 10 seconds to keep it live
-    const interval = setInterval(async () => {
-         const data = await getLeaderboard();
-         setLeaders(data);
-    }, 10000);
+    // Poll for updates every 5 seconds to ensure real-time feel
+    const interval = setInterval(() => {
+         fetchLeaders(false);
+    }, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchLeaders]);
+
+  const handleRefresh = () => {
+      fetchLeaders(true);
+  };
 
   const getRankIcon = (index: number) => {
     switch (index) {
@@ -70,15 +76,22 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                 </div>
             </div>
             <h1 className="text-2xl font-black text-gray-800">قائمة الأبطال</h1>
-            <p className="text-gray-500 text-sm">ترتيب جميع اللاعبين (عالمياً)</p>
+            <p className="text-gray-500 text-sm">نتائج جميع اللاعبين</p>
           </div>
           
-          <div className="w-10"></div> {/* Spacer */}
+          <button 
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className={`bg-white p-3 rounded-full shadow-md text-indigo-600 hover:bg-indigo-50 transition-all ${isRefreshing ? 'opacity-70 cursor-not-allowed' : 'hover:scale-110'}`}
+            title="تحديث القائمة"
+          >
+            <RefreshCw size={24} className={isRefreshing ? 'animate-spin' : ''} />
+          </button>
         </div>
 
         {/* Table Card */}
         <div className="bg-white rounded-3xl shadow-xl border border-gray-200 overflow-hidden min-h-[300px] relative">
-            {isLoading ? (
+            {isLoading && leaders.length === 0 ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/80 z-10">
                     <Loader2 size={48} className="text-indigo-600 animate-spin mb-4" />
                     <p className="text-gray-500 font-medium">جاري تحديث النتائج...</p>
@@ -98,7 +111,6 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                     <tbody>
                         {leaders.map((player, index) => {
                             const isCurrentUser = player.name === currentUser;
-                            // Calculate badges dynamically based on current score
                             const unlockedBadges = getBadgeStatus(player.totalCorrect).filter(b => b.unlocked);
 
                             return (
@@ -136,7 +148,9 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                                                     </div>
                                                 ))
                                             ) : (
-                                                <span className="text-xs text-gray-300">لا يوجد جوائز بعد</span>
+                                                <span className="text-xs text-gray-300 flex items-center gap-1">
+                                                    لا يوجد <span className="opacity-50">🔒</span>
+                                                </span>
                                             )}
                                         </div>
                                     </td>
@@ -148,7 +162,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                                 <td colSpan={4} className="py-12 text-center text-gray-500 flex flex-col items-center justify-center gap-2">
                                     <Trophy size={48} className="text-gray-200" />
                                     <p>لا يوجد لاعبين في القائمة حتى الآن.</p>
-                                    <p className="text-sm text-gray-400">كن أول من يلعب!</p>
+                                    <p className="text-sm text-gray-400">سجل الدخول لتكون الأول!</p>
                                 </td>
                             </tr>
                         )}
@@ -160,7 +174,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
         {/* Motivation */}
         <div className="mt-8 text-center bg-white/50 backdrop-blur-sm p-4 rounded-2xl border border-white shadow-sm">
             <p className="text-indigo-800 font-medium">
-                💡 يتم تحديث النتائج تلقائياً من جميع الأجهزة.
+                💡 القائمة تتحدث تلقائياً. يمكنك الضغط على زر التحديث في الأعلى.
             </p>
         </div>
 

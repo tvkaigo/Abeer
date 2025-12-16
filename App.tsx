@@ -31,6 +31,15 @@ const App: React.FC = () => {
     }
   });
 
+  // Ensure the user is registered in the cloud leaderboard when the app starts
+  useEffect(() => {
+    if (userData) {
+      registerNewPlayer(userData.name, userData.grade).catch(err => 
+        console.error("Background leaderboard sync failed:", err)
+      );
+    }
+  }, [userData]); // Run when userData is loaded or changed
+
   useEffect(() => {
     const savedScore = localStorage.getItem('mathGeniusHighScore');
     if (savedScore) {
@@ -89,8 +98,6 @@ const App: React.FC = () => {
     }
 
     // Update Local Session High Score (only for standard 10 question games usually, but we can track all or segment)
-    // For simplicity, we just check absolute score, though getting 5/5 is less than 10/10.
-    // If the game has fewer questions than the current highscore, it's impossible to beat it if highscore is > 5.
     if (result.score > highScore) {
       setHighScore(result.score);
       setIsNewHighScore(true);
