@@ -64,7 +64,7 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack }) => {
 
           <div className="bg-white p-4 rounded-2xl shadow-sm border border-indigo-100 flex flex-col items-center justify-center text-center col-span-2 md:col-span-1">
              <div className="bg-pink-100 p-2 rounded-full mb-2 text-pink-600">
-                <Award size={24} />
+                <Award size={24} fill="currentColor" />
             </div>
             <div className="text-xl font-black text-gray-800">
                 {badges.filter(b => b.unlocked).length} / 4
@@ -120,7 +120,7 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack }) => {
         {/* Badges Section */}
         <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 mb-8">
           <h2 className="text-lg font-bold text-gray-700 mb-6 flex items-center gap-2">
-            <Award size={20} className="text-yellow-500" />
+            <Award size={20} className="text-yellow-500" fill="currentColor" />
             الجوائز والأوسمة
           </h2>
           

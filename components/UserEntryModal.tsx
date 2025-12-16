@@ -1,9 +1,19 @@
 import React, { useState } from 'react';
-import { User, GraduationCap, ArrowLeft } from 'lucide-react';
+import { User, GraduationCap, ArrowLeft, ChevronDown } from 'lucide-react';
 
 interface UserEntryModalProps {
   onSubmit: (name: string, grade: string) => void;
 }
+
+const PREDEFINED_USERS = [
+  'عبير محمد',
+  'عبير حنش',
+  'ندى',
+  'اسماء',
+  'ريم',
+  'منال',
+  'عائشه'
+];
 
 const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSubmit }) => {
   const [name, setName] = useState('');
@@ -13,7 +23,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSubmit }) => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !grade.trim()) {
-      setError('يرجى تعبئة جميع الحقول');
+      setError('يرجى اختيار الاسم والصف');
       return;
     }
     onSubmit(name, grade);
@@ -30,21 +40,29 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSubmit }) => {
             <User size={32} />
           </div>
           <h2 className="text-2xl font-bold text-gray-800">مرحباً بك في العبقري الصغير!</h2>
-          <p className="text-gray-500 mt-2">للبدء، يرجى إدخال بياناتك</p>
+          <p className="text-gray-500 mt-2">للبدء، يرجى اختيار اسمك</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-gray-700 font-bold mb-2 pr-1">اسم الطالبة</label>
             <div className="relative">
-              <input 
-                type="text" 
+              <select 
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 outline-none transition-all pr-10"
-                placeholder="اكتبي اسمك هنا..."
-              />
-              <User className="absolute left-3 top-3.5 text-gray-400" size={20} />
+                className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 outline-none transition-all pr-10 appearance-none bg-white text-gray-700 font-medium"
+              >
+                <option value="" disabled>اختر اسمك من القائمة...</option>
+                {PREDEFINED_USERS.map((user) => (
+                  <option key={user} value={user}>
+                    {user}
+                  </option>
+                ))}
+              </select>
+              <User className="absolute left-3 top-3.5 text-gray-400 pointer-events-none" size={20} />
+              <div className="absolute right-3 top-3.5 pointer-events-none text-gray-500">
+                <ChevronDown size={20} />
+              </div>
             </div>
           </div>
 

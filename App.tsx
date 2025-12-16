@@ -3,10 +3,11 @@ import WelcomeScreen from './components/WelcomeScreen';
 import GameScreen from './components/GameScreen';
 import ResultScreen from './components/ResultScreen';
 import AnalyticsScreen from './components/AnalyticsScreen';
+import LeaderboardScreen from './components/LeaderboardScreen';
 import UserEntryModal from './components/UserEntryModal';
-import { AppState, GameConfig, GameResult, Question } from './types';
+import { AppState, GameConfig, GameResult, Question, Difficulty, Operation } from './types';
 import { generateQuestions } from './services/mathService';
-import { updateUserStats } from './services/statsService';
+import { updateUserStats, updateLeaderboard, registerNewPlayer } from './services/statsService';
 
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.WELCOME);
@@ -16,6 +17,9 @@ const App: React.FC = () => {
   const [highScore, setHighScore] = useState<number>(0);
   const [isNewHighScore, setIsNewHighScore] = useState<boolean>(false);
   
+  // Track custom time limit (e.g., 60s for Quick Test)
+  const [timeLimit, setTimeLimit] = useState<number>(120);
+
   // Initialize user data from localStorage if available
   const [userData, setUserData] = useState<{name: string, grade: string} | null>(() => {
     try {
@@ -38,11 +42,30 @@ const App: React.FC = () => {
     const data = { name, grade };
     setUserData(data);
     localStorage.setItem('mathGeniusUserData', JSON.stringify(data));
+    
+    // Register player in leaderboard immediately
+    registerNewPlayer(name, grade);
   };
 
   const handleStartGame = (config: GameConfig) => {
     setCurrentConfig(config);
+    // Standard game: 2 minutes
+    setTimeLimit(120);
     const newQuestions = generateQuestions(config.difficulty, config.operation);
+    setQuestions(newQuestions);
+    setAppState(AppState.PLAYING);
+  };
+
+  const handleQuickStart = () => {
+    // Quick Test: Beginner, Mixed Operations, 5 Questions, 60 seconds
+    const difficulty = Difficulty.BEGINNER;
+    const operation = Operation.MIXED;
+    const config = { difficulty, operation };
+    
+    setCurrentConfig(config);
+    setTimeLimit(60); // 1 Minute only
+    
+    const newQuestions = generateQuestions(difficulty, operation, 5);
     setQuestions(newQuestions);
     setAppState(AppState.PLAYING);
   };
@@ -51,9 +74,16 @@ const App: React.FC = () => {
     setGameResult(result);
     
     // Update Persistent Stats (Analytics)
-    updateUserStats(result);
+    const updatedStats = updateUserStats(result);
 
-    // Update Local Session High Score
+    // Update Leaderboard if user is known
+    if (userData) {
+      updateLeaderboard(userData.name, userData.grade, updatedStats.totalCorrect);
+    }
+
+    // Update Local Session High Score (only for standard 10 question games usually, but we can track all or segment)
+    // For simplicity, we just check absolute score, though getting 5/5 is less than 10/10.
+    // If the game has fewer questions than the current highscore, it's impossible to beat it if highscore is > 5.
     if (result.score > highScore) {
       setHighScore(result.score);
       setIsNewHighScore(true);
@@ -76,7 +106,11 @@ const App: React.FC = () => {
     setAppState(AppState.ANALYTICS);
   };
 
-  const handleBackFromAnalytics = () => {
+  const handleShowLeaderboard = () => {
+    setAppState(AppState.LEADERBOARD);
+  };
+
+  const handleBackToWelcome = () => {
     setAppState(AppState.WELCOME);
   };
 
@@ -86,7 +120,9 @@ const App: React.FC = () => {
         <>
           <WelcomeScreen 
             onStart={handleStartGame} 
+            onQuickStart={handleQuickStart}
             onShowAnalytics={handleShowAnalytics}
+            onShowLeaderboard={handleShowLeaderboard}
             highScore={highScore}
             userName={userData?.name}
           />
@@ -96,7 +132,14 @@ const App: React.FC = () => {
       
       {appState === AppState.ANALYTICS && (
         <AnalyticsScreen 
-          onBack={handleBackFromAnalytics}
+          onBack={handleBackToWelcome}
+        />
+      )}
+
+      {appState === AppState.LEADERBOARD && (
+        <LeaderboardScreen 
+          onBack={handleBackToWelcome}
+          currentUser={userData?.name}
         />
       )}
 
@@ -105,6 +148,7 @@ const App: React.FC = () => {
           questions={questions} 
           onEndGame={handleEndGame}
           onExit={handleRestart}
+          initialTime={timeLimit}
         />
       )}
 

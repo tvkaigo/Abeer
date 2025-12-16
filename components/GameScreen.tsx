@@ -8,14 +8,15 @@ interface GameScreenProps {
   questions: Question[];
   onEndGame: (result: GameResult) => void;
   onExit: () => void;
+  initialTime?: number; // Optional prop for custom time
 }
 
-const TOTAL_TIME_SECONDS = 2 * 60; // 2 minutes
+const DEFAULT_TIME = 2 * 60; // 2 minutes default
 
-const GameScreen: React.FC<GameScreenProps> = ({ questions, onEndGame, onExit }) => {
+const GameScreen: React.FC<GameScreenProps> = ({ questions, onEndGame, onExit, initialTime = DEFAULT_TIME }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [userAnswer, setUserAnswer] = useState<string>('');
-  const [timeLeft, setTimeLeft] = useState(TOTAL_TIME_SECONDS);
+  const [timeLeft, setTimeLeft] = useState(initialTime);
   const [attempts, setAttempts] = useState(0);
   const [feedback, setFeedback] = useState<'none' | 'correct' | 'incorrect'>('none');
   const [history, setHistory] = useState<Question[]>([]);
@@ -55,12 +56,12 @@ const GameScreen: React.FC<GameScreenProps> = ({ questions, onEndGame, onExit })
     const currentHistory = finalHistory || history;
     const correctCount = currentHistory.filter(q => q.isCorrect).length;
     
-    // Play completion sound based on score >= 4 (Good or better)
-    playCompletion(correctCount >= 4);
+    // Play completion sound based on score >= 40% (Good or better)
+    playCompletion(correctCount >= Math.ceil(questions.length * 0.4));
 
     onEndGame({
       score: correctCount,
-      totalQuestions: 10,
+      totalQuestions: questions.length,
       history: currentHistory
     });
   };
@@ -134,7 +135,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ questions, onEndGame, onExit })
     setFeedback('none');
     setUserAnswer('');
     setHistory([]);
-    setTimeLeft(TOTAL_TIME_SECONDS);
+    setTimeLeft(initialTime);
   };
 
   const formatTime = (seconds: number) => {
@@ -148,27 +149,29 @@ const GameScreen: React.FC<GameScreenProps> = ({ questions, onEndGame, onExit })
   // Timer Circle config
   const radius = 26;
   const circumference = 2 * Math.PI * radius;
-  const timeElapsed = TOTAL_TIME_SECONDS - timeLeft;
+  const timeElapsed = initialTime - timeLeft;
   // Fills up as time runs out
-  const strokeDashoffset = circumference - (timeElapsed / TOTAL_TIME_SECONDS) * circumference;
+  const strokeDashoffset = circumference - (timeElapsed / initialTime) * circumference;
   const isUrgent = timeLeft <= 10;
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
       {/* Top Bar */}
-      <div className="w-full max-w-2xl flex justify-between items-center mb-8 px-4">
+      <div className="w-full max-w-2xl flex justify-between items-center mb-8 px-2 md:px-4 gap-2">
         
         {/* Home Button (Start/Right in RTL) */}
         <button 
             onClick={onExit}
-            className="bg-white p-3 rounded-full shadow-md text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 transition-all hover:scale-105"
+            className="bg-white px-4 py-3 rounded-full shadow-md text-gray-600 hover:text-red-600 hover:bg-red-50 transition-all hover:scale-105 flex items-center gap-2"
             title="العودة للقائمة الرئيسية"
         >
-            <Home size={28} />
+            <Home size={20} />
+            <span className="font-bold text-sm hidden sm:inline">العودة للقائمة الرئيسية</span>
+            <span className="font-bold text-sm sm:hidden">خروج</span>
         </button>
 
         {/* Visual Countdown Timer (Center) */}
-        <div className={`relative flex items-center justify-center w-20 h-20 bg-white rounded-full shadow-lg ${isUrgent && !isTimeUp ? 'animate-pulse ring-4 ring-red-200' : ''}`}>
+        <div className={`relative flex items-center justify-center w-20 h-20 bg-white rounded-full shadow-lg flex-shrink-0 ${isUrgent && !isTimeUp ? 'animate-pulse ring-4 ring-red-200' : ''}`}>
              <svg className="transform -rotate-90 w-full h-full" viewBox="0 0 60 60">
                 <circle
                   cx="30"
@@ -238,6 +241,18 @@ const GameScreen: React.FC<GameScreenProps> = ({ questions, onEndGame, onExit })
                           feedback === 'incorrect' ? 'border-red-400 bg-red-50 text-red-700 placeholder-red-300' : 
                           'border-indigo-100 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 text-gray-800'}`}
                 />
+                
+                {/* Visual Feedback Icons */}
+                {feedback === 'correct' && (
+                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-green-600 animate-pop-in">
+                        <CheckCircle2 size={36} strokeWidth={3} />
+                    </div>
+                )}
+                {feedback === 'incorrect' && (
+                     <div className="absolute left-4 top-1/2 -translate-y-1/2 text-red-500 animate-pop-in">
+                        <XCircle size={36} strokeWidth={3} />
+                    </div>
+                )}
             </div>
 
             {/* Messages */}

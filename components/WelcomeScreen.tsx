@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
 import { Difficulty, Operation, GameConfig } from '../types';
-import { Brain, Calculator, ChevronLeft, GraduationCap, Zap, Divide, X as MultiplyIcon, Plus, Minus, Trophy, BarChart3 } from 'lucide-react';
+import { Brain, Calculator, ChevronLeft, Zap, Divide, X as MultiplyIcon, Plus, Minus, Trophy, BarChart3, Timer } from 'lucide-react';
 import { initAudio } from '../services/soundService';
 
 interface WelcomeScreenProps {
   onStart: (config: GameConfig) => void;
+  onQuickStart: () => void;
   onShowAnalytics: () => void;
+  onShowLeaderboard: () => void;
   highScore: number;
   userName?: string;
 }
 
-const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onShowAnalytics, highScore, userName }) => {
+const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onQuickStart, onShowAnalytics, onShowLeaderboard, highScore, userName }) => {
   const [difficulty, setDifficulty] = useState<Difficulty | null>(null);
   const [operation, setOperation] = useState<Operation | null>(null);
 
@@ -19,6 +21,11 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onShowAnalytics,
       initAudio();
       onStart({ difficulty, operation });
     }
+  };
+
+  const handleQuickStart = () => {
+      initAudio();
+      onQuickStart();
   };
 
   return (
@@ -31,14 +38,24 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onShowAnalytics,
         <span className="text-xl">{highScore}/10</span>
       </div>
 
-      {/* Analytics Button */}
-      <div className="absolute top-6 right-6 animate-pop-in">
+      {/* Action Buttons (Analytics & Leaderboard) */}
+      <div className="absolute top-6 right-6 flex gap-3 animate-pop-in">
+        <button 
+            onClick={onShowLeaderboard}
+            className="bg-white/80 backdrop-blur-sm px-4 py-2 rounded-2xl shadow-sm border border-yellow-100 flex items-center gap-2 text-indigo-900 font-bold hover:bg-white hover:scale-105 transition-all"
+            title="قائمة الأبطال"
+        >
+            <Trophy className="text-yellow-500" size={20} />
+            <span className="hidden sm:inline text-sm">قائمة الأبطال</span>
+        </button>
+
         <button 
             onClick={onShowAnalytics}
             className="bg-white/80 backdrop-blur-sm px-4 py-2 rounded-2xl shadow-sm border border-indigo-100 flex items-center gap-2 text-indigo-900 font-bold hover:bg-white hover:scale-105 transition-all"
+            title="تحليلاتي"
         >
             <BarChart3 className="text-blue-500" size={20} />
-            <span className="text-sm">تحليلاتي</span>
+            <span className="hidden sm:inline text-sm">تحليلاتي</span>
         </button>
       </div>
 
@@ -105,17 +122,27 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onShowAnalytics,
           </div>
         </section>
 
-        <button
-          onClick={handleStart}
-          disabled={!difficulty || !operation}
-          className={`w-full py-4 rounded-2xl text-2xl font-bold text-white shadow-xl flex items-center justify-center gap-3 transition-all duration-300
-            ${difficulty && operation 
-              ? 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 hover:scale-[1.02] cursor-pointer' 
-              : 'bg-gray-300 cursor-not-allowed grayscale'}`}
-        >
-          <span>انطلق</span>
-          <ChevronLeft className={`transition-transform ${difficulty && operation ? 'translate-x-1' : ''}`} />
-        </button>
+        <div className="flex flex-col gap-3">
+            <button
+            onClick={handleStart}
+            disabled={!difficulty || !operation}
+            className={`w-full py-4 rounded-2xl text-2xl font-bold text-white shadow-xl flex items-center justify-center gap-3 transition-all duration-300
+                ${difficulty && operation 
+                ? 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 hover:scale-[1.02] cursor-pointer' 
+                : 'bg-gray-300 cursor-not-allowed grayscale'}`}
+            >
+            <span>انطلق</span>
+            <ChevronLeft className={`transition-transform ${difficulty && operation ? 'translate-x-1' : ''}`} />
+            </button>
+
+            <button
+                onClick={handleQuickStart}
+                className="w-full py-3 rounded-2xl text-lg font-bold text-orange-700 bg-orange-100 border-2 border-orange-200 hover:bg-orange-200 hover:scale-[1.01] shadow-sm flex items-center justify-center gap-2 transition-all"
+            >
+                <Timer size={20} className="text-orange-600" />
+                <span>اختبار سريع (5 أسئلة عشوائية)</span>
+            </button>
+        </div>
       </div>
     </div>
   );

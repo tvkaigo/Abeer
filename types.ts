@@ -8,7 +8,8 @@ export enum Operation {
   ADDITION = 'جمع',
   SUBTRACTION = 'طرح',
   MULTIPLICATION = 'ضرب',
-  DIVISION = 'قسمة'
+  DIVISION = 'قسمة',
+  MIXED = 'منوع'
 }
 
 export interface Question {
@@ -36,7 +37,8 @@ export enum AppState {
   WELCOME = 'WELCOME',
   PLAYING = 'PLAYING',
   RESULTS = 'RESULTS',
-  ANALYTICS = 'ANALYTICS'
+  ANALYTICS = 'ANALYTICS',
+  LEADERBOARD = 'LEADERBOARD'
 }
 
 export interface DailyStat {
@@ -51,4 +53,12 @@ export interface UserStats {
   streak: number;
   lastPlayedDate: string | null;
   dailyHistory: Record<string, DailyStat>; // Key is YYYY-MM-DD
+}
+
+export interface LeaderboardEntry {
+  name: string;
+  grade: string;
+  totalCorrect: number;
+  badgesCount: number;
+  lastActive: string;
 }

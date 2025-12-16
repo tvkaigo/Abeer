@@ -1,6 +1,8 @@
-import { UserStats, GameResult } from '../types';
+import { UserStats, GameResult, LeaderboardEntry } from '../types';
 
 const STORAGE_KEY = 'mathGeniusStats_v1';
+// Changed key to v2 to ensure we start with a clean slate
+const LEADERBOARD_KEY = 'mathGeniusLeaderboard_v2';
 
 const getTodayDateString = (): string => {
   return new Date().toISOString().split('T')[0];
@@ -96,4 +98,85 @@ export const getBadgeStatus = (totalCorrect: number) => {
     { id: 3, name: 'الملك', required: 200, icon: '👑', unlocked: totalCorrect >= 200, color: 'text-purple-600 bg-purple-100 border-purple-200' },
     { id: 4, name: 'الأسطورة', required: 300, icon: '🏆', unlocked: totalCorrect >= 300, color: 'text-yellow-600 bg-yellow-100 border-yellow-200' },
   ];
+};
+
+// --- Leaderboard Logic ---
+
+export const getLeaderboard = (): LeaderboardEntry[] => {
+  try {
+    const stored = localStorage.getItem(LEADERBOARD_KEY);
+    if (stored) {
+      return JSON.parse(stored);
+    }
+    return []; 
+  } catch (e) {
+    return [];
+  }
+};
+
+// New function to register a player immediately upon entry
+export const registerNewPlayer = (name: string, grade: string) => {
+    try {
+        const currentList = getLeaderboard();
+        const existingIndex = currentList.findIndex(p => p.name === name);
+
+        if (existingIndex === -1) {
+            // Only add if not exists
+            currentList.push({
+                name,
+                grade,
+                totalCorrect: 0,
+                badgesCount: 0,
+                lastActive: getTodayDateString()
+            });
+            // Sort (even though score is 0, to keep structure consistent)
+            const sortedList = currentList.sort((a, b) => b.totalCorrect - a.totalCorrect);
+            localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(sortedList));
+        } else {
+            // If exists, just update last active
+             currentList[existingIndex].lastActive = getTodayDateString();
+             currentList[existingIndex].grade = grade; // Update grade if changed
+             localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(currentList));
+        }
+    } catch (e) {
+        console.error("Error registering player", e);
+    }
+};
+
+export const updateLeaderboard = (name: string, grade: string, totalCorrect: number) => {
+  try {
+    const currentList = getLeaderboard();
+    const badgesCount = getBadgeStatus(totalCorrect).filter(b => b.unlocked).length;
+    
+    const existingIndex = currentList.findIndex(p => p.name === name);
+    
+    if (existingIndex >= 0) {
+      // Update existing player
+      currentList[existingIndex] = {
+        ...currentList[existingIndex],
+        totalCorrect, // Ensure this is the cumulative total
+        badgesCount,
+        lastActive: getTodayDateString(),
+        grade // Update grade in case it changed
+      };
+    } else {
+      // Add new player (fallback if not registered via registerNewPlayer)
+      currentList.push({
+        name,
+        grade,
+        totalCorrect,
+        badgesCount,
+        lastActive: getTodayDateString()
+      });
+    }
+
+    // Sort by Total Correct (Descending)
+    const sortedList = currentList.sort((a, b) => b.totalCorrect - a.totalCorrect);
+
+    localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(sortedList));
+    return sortedList;
+  } catch (e) {
+    console.error("Error updating leaderboard", e);
+    return [];
+  }
 };
