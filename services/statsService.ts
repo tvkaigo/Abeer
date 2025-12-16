@@ -1,7 +1,7 @@
 import { UserStats, GameResult, LeaderboardEntry } from '../types';
 
-const STORAGE_KEY = 'mathGeniusStats_v1';
-// Changed key to v2 to ensure we start with a clean slate
+// Prefix for individual user data
+const USER_STATS_PREFIX = 'mathGeniusStats_';
 const LEADERBOARD_KEY = 'mathGeniusLeaderboard_v2';
 
 const getTodayDateString = (): string => {
@@ -16,28 +16,35 @@ export const getInitialStats = (): UserStats => ({
   dailyHistory: {}
 });
 
-export const loadStats = (): UserStats => {
+export const loadStats = (username: string): UserStats => {
+  if (!username) return getInitialStats();
+  
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const key = `${USER_STATS_PREFIX}${username}`;
+    const stored = localStorage.getItem(key);
     if (stored) {
       return JSON.parse(stored);
     }
   } catch (e) {
-    console.error("Failed to load stats", e);
+    console.error("Failed to load stats for user", username, e);
   }
   return getInitialStats();
 };
 
-export const saveStats = (stats: UserStats) => {
+export const saveStats = (username: string, stats: UserStats) => {
+  if (!username) return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(stats));
+    const key = `${USER_STATS_PREFIX}${username}`;
+    localStorage.setItem(key, JSON.stringify(stats));
   } catch (e) {
-    console.error("Failed to save stats", e);
+    console.error("Failed to save stats for user", username, e);
   }
 };
 
-export const updateUserStats = (result: GameResult): UserStats => {
-  const stats = loadStats();
+export const updateUserStats = (result: GameResult, username: string): UserStats => {
+  if (!username) return getInitialStats();
+
+  const stats = loadStats(username);
   const today = getTodayDateString();
   const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
 
@@ -54,8 +61,12 @@ export const updateUserStats = (result: GameResult): UserStats => {
   } else if (stats.lastPlayedDate === yesterday) {
     stats.streak += 1;
   } else {
-    // Missed a day or first time
-    stats.streak = 1;
+    // Missed a day or first time (only reset streak if last played date exists and is older than yesterday)
+    if (stats.lastPlayedDate && stats.lastPlayedDate !== yesterday) {
+        stats.streak = 1;
+    } else if (!stats.lastPlayedDate) {
+        stats.streak = 1;
+    }
   }
   stats.lastPlayedDate = today;
 
@@ -67,7 +78,7 @@ export const updateUserStats = (result: GameResult): UserStats => {
   stats.dailyHistory[today].correct += correctCount;
   stats.dailyHistory[today].incorrect += incorrectCount;
 
-  saveStats(stats);
+  saveStats(username, stats);
   return stats;
 };
 
@@ -114,30 +125,36 @@ export const getLeaderboard = (): LeaderboardEntry[] => {
   }
 };
 
-// New function to register a player immediately upon entry
+// New function to register a player immediately upon entry or update existing
 export const registerNewPlayer = (name: string, grade: string) => {
     try {
         const currentList = getLeaderboard();
         const existingIndex = currentList.findIndex(p => p.name === name);
+
+        // Load actual stats to ensure leaderboard reflects reality
+        const userStats = loadStats(name);
 
         if (existingIndex === -1) {
             // Only add if not exists
             currentList.push({
                 name,
                 grade,
-                totalCorrect: 0,
-                badgesCount: 0,
+                totalCorrect: userStats.totalCorrect, // Sync with saved stats
+                badgesCount: getBadgeStatus(userStats.totalCorrect).filter(b => b.unlocked).length,
                 lastActive: getTodayDateString()
             });
-            // Sort (even though score is 0, to keep structure consistent)
-            const sortedList = currentList.sort((a, b) => b.totalCorrect - a.totalCorrect);
-            localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(sortedList));
         } else {
-            // If exists, just update last active
+             // Update basic info
              currentList[existingIndex].lastActive = getTodayDateString();
-             currentList[existingIndex].grade = grade; // Update grade if changed
-             localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(currentList));
+             currentList[existingIndex].grade = grade;
+             // Ensure score is synced with personal storage
+             currentList[existingIndex].totalCorrect = userStats.totalCorrect;
+             currentList[existingIndex].badgesCount = getBadgeStatus(userStats.totalCorrect).filter(b => b.unlocked).length;
         }
+        
+        // Sort
+        const sortedList = currentList.sort((a, b) => b.totalCorrect - a.totalCorrect);
+        localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(sortedList));
     } catch (e) {
         console.error("Error registering player", e);
     }
@@ -154,13 +171,13 @@ export const updateLeaderboard = (name: string, grade: string, totalCorrect: num
       // Update existing player
       currentList[existingIndex] = {
         ...currentList[existingIndex],
-        totalCorrect, // Ensure this is the cumulative total
+        totalCorrect, // This comes from the updated user stats
         badgesCount,
         lastActive: getTodayDateString(),
-        grade // Update grade in case it changed
+        grade 
       };
     } else {
-      // Add new player (fallback if not registered via registerNewPlayer)
+      // Add new player
       currentList.push({
         name,
         grade,

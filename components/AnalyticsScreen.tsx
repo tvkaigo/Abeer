@@ -1,19 +1,23 @@
 import React, { useEffect, useState } from 'react';
-import { Home, TrendingUp, Calendar, Award, CheckCircle2, XCircle } from 'lucide-react';
+import { Home, TrendingUp, Calendar, Award, CheckCircle2 } from 'lucide-react';
 import { loadStats, getLast7DaysStats, getBadgeStatus } from '../services/statsService';
 import { UserStats } from '../types';
 
 interface AnalyticsScreenProps {
   onBack: () => void;
+  userName?: string;
 }
 
-const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack }) => {
+const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) => {
   const [stats, setStats] = useState<UserStats | null>(null);
 
   useEffect(() => {
-    setStats(loadStats());
-  }, []);
+    if (userName) {
+        setStats(loadStats(userName));
+    }
+  }, [userName]);
 
+  if (!userName) return <div className="min-h-screen flex items-center justify-center p-4 text-center">يرجى تسجيل الدخول لعرض التحليلات.</div>;
   if (!stats) return <div className="min-h-screen flex items-center justify-center">جاري التحميل...</div>;
 
   const weeklyData = getLast7DaysStats(stats);
@@ -37,10 +41,13 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack }) => {
           >
             <Home size={24} />
           </button>
-          <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-            <TrendingUp className="text-indigo-600" />
-            تحليلات الأداء
-          </h1>
+          <div className="flex flex-col items-center">
+            <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                <TrendingUp className="text-indigo-600" />
+                تحليلات الأداء
+            </h1>
+            <span className="text-sm text-gray-500">{userName}</span>
+          </div>
           <div className="w-10"></div> {/* Spacer for center alignment */}
         </div>
 

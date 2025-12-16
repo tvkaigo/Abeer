@@ -38,12 +38,14 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const handleUserEntry = (name: string, grade: string) => {
+  const handleUserEntry = (name: string) => {
+    // Grade is removed from input, using default placeholder
+    const grade = "-";
     const data = { name, grade };
     setUserData(data);
     localStorage.setItem('mathGeniusUserData', JSON.stringify(data));
     
-    // Register player in leaderboard immediately
+    // Register player in leaderboard immediately (will sync with existing stats if any)
     registerNewPlayer(name, grade);
   };
 
@@ -73,12 +75,11 @@ const App: React.FC = () => {
   const handleEndGame = (result: GameResult) => {
     setGameResult(result);
     
-    // Update Persistent Stats (Analytics)
-    const updatedStats = updateUserStats(result);
-
-    // Update Leaderboard if user is known
+    // Update Persistent Stats (Analytics) - only if user is logged in
     if (userData) {
-      updateLeaderboard(userData.name, userData.grade, updatedStats.totalCorrect);
+        const updatedStats = updateUserStats(result, userData.name);
+        // Update Leaderboard with the NEW total correct count
+        updateLeaderboard(userData.name, userData.grade, updatedStats.totalCorrect);
     }
 
     // Update Local Session High Score (only for standard 10 question games usually, but we can track all or segment)
@@ -133,6 +134,7 @@ const App: React.FC = () => {
       {appState === AppState.ANALYTICS && (
         <AnalyticsScreen 
           onBack={handleBackToWelcome}
+          userName={userData?.name}
         />
       )}
 
