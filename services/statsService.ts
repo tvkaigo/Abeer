@@ -1,8 +1,10 @@
 import { UserStats, GameResult, LeaderboardEntry } from '../types';
 
-// Prefix for individual user data
-const USER_STATS_PREFIX = 'mathGeniusStats_';
-const LEADERBOARD_KEY = 'mathGeniusLeaderboard_v2';
+// Using a public KVDB bucket for demo purposes to allow cross-device sync.
+// In a real production app, this should be a secure backend API.
+const CLOUD_API_URL = 'https://kvdb.io/beta/math-genius-app-public-db';
+const USER_STATS_PREFIX = 'stats_';
+const LEADERBOARD_KEY = 'leaderboard_v3';
 
 const getTodayDateString = (): string => {
   return new Date().toISOString().split('T')[0];
@@ -16,35 +18,62 @@ export const getInitialStats = (): UserStats => ({
   dailyHistory: {}
 });
 
-export const loadStats = (username: string): UserStats => {
+// --- Cloud Helpers ---
+
+const fetchFromCloud = async <T>(key: string): Promise<T | null> => {
+  try {
+    const response = await fetch(`${CLOUD_API_URL}/${key}`);
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error('Network response was not ok');
+    return await response.json();
+  } catch (e) {
+    console.warn(`Cloud fetch failed for ${key}, falling back to local`, e);
+    return null;
+  }
+};
+
+const saveToCloud = async (key: string, data: any): Promise<void> => {
+  try {
+    await fetch(`${CLOUD_API_URL}/${key}`, {
+      method: 'POST', // KVDB uses POST to update/create
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+  } catch (e) {
+    console.warn(`Cloud save failed for ${key}`, e);
+  }
+};
+
+// --- Stats Logic ---
+
+export const loadStats = async (username: string): Promise<UserStats> => {
   if (!username) return getInitialStats();
   
-  try {
-    const key = `${USER_STATS_PREFIX}${username}`;
-    const stored = localStorage.getItem(key);
-    if (stored) {
-      return JSON.parse(stored);
-    }
-  } catch (e) {
-    console.error("Failed to load stats for user", username, e);
+  // 1. Try Cloud
+  const cloudStats = await fetchFromCloud<UserStats>(`${USER_STATS_PREFIX}${username}`);
+  if (cloudStats) {
+    // Update local cache
+    localStorage.setItem(`${USER_STATS_PREFIX}${username}`, JSON.stringify(cloudStats));
+    return cloudStats;
   }
+
+  // 2. Fallback to Local
+  try {
+    const local = localStorage.getItem(`${USER_STATS_PREFIX}${username}`);
+    if (local) return JSON.parse(local);
+  } catch (e) {
+    console.error("Local load failed", e);
+  }
+
   return getInitialStats();
 };
 
-export const saveStats = (username: string, stats: UserStats) => {
-  if (!username) return;
-  try {
-    const key = `${USER_STATS_PREFIX}${username}`;
-    localStorage.setItem(key, JSON.stringify(stats));
-  } catch (e) {
-    console.error("Failed to save stats for user", username, e);
-  }
-};
-
-export const updateUserStats = (result: GameResult, username: string): UserStats => {
+export const updateUserStats = async (result: GameResult, username: string): Promise<UserStats> => {
   if (!username) return getInitialStats();
 
-  const stats = loadStats(username);
+  // Load current stats (awaiting ensures we have latest)
+  const stats = await loadStats(username);
+  
   const today = getTodayDateString();
   const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
 
@@ -57,15 +86,15 @@ export const updateUserStats = (result: GameResult, username: string): UserStats
 
   // 2. Update Streak
   if (stats.lastPlayedDate === today) {
-    // Already played today, streak remains same
+    // Already played today
   } else if (stats.lastPlayedDate === yesterday) {
     stats.streak += 1;
   } else {
-    // Missed a day or first time (only reset streak if last played date exists and is older than yesterday)
-    if (stats.lastPlayedDate && stats.lastPlayedDate !== yesterday) {
+    // Only reset if missed a day (and played before)
+    if (stats.lastPlayedDate) {
         stats.streak = 1;
-    } else if (!stats.lastPlayedDate) {
-        stats.streak = 1;
+    } else {
+        stats.streak = 1; // First game ever
     }
   }
   stats.lastPlayedDate = today;
@@ -78,9 +107,84 @@ export const updateUserStats = (result: GameResult, username: string): UserStats
   stats.dailyHistory[today].correct += correctCount;
   stats.dailyHistory[today].incorrect += incorrectCount;
 
-  saveStats(username, stats);
+  // 4. Save to Cloud & Local
+  localStorage.setItem(`${USER_STATS_PREFIX}${username}`, JSON.stringify(stats));
+  await saveToCloud(`${USER_STATS_PREFIX}${username}`, stats);
+
+  // 5. Trigger Leaderboard Update
+  await updateLeaderboard(username, "-", stats.totalCorrect);
+
   return stats;
 };
+
+// --- Leaderboard Logic ---
+
+export const getLeaderboard = async (): Promise<LeaderboardEntry[]> => {
+  // 1. Try Cloud
+  const cloudData = await fetchFromCloud<LeaderboardEntry[]>(LEADERBOARD_KEY);
+  if (cloudData) {
+    localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(cloudData));
+    return cloudData;
+  }
+
+  // 2. Fallback Local
+  try {
+    const local = localStorage.getItem(LEADERBOARD_KEY);
+    if (local) return JSON.parse(local);
+  } catch (e) {
+    console.error("Local leaderboard load failed", e);
+  }
+  return [];
+};
+
+export const registerNewPlayer = async (name: string, grade: string) => {
+  // Check if player exists in stats to carry over score
+  const stats = await loadStats(name);
+  await updateLeaderboard(name, grade, stats.totalCorrect);
+};
+
+export const updateLeaderboard = async (name: string, grade: string, totalCorrect: number) => {
+  try {
+    // 1. Get current list (prefer cloud)
+    let currentList = await getLeaderboard();
+    
+    // 2. Calculate badges
+    const badgesCount = getBadgeStatus(totalCorrect).filter(b => b.unlocked).length;
+    
+    const existingIndex = currentList.findIndex(p => p.name === name);
+    const today = getTodayDateString();
+
+    const newEntry: LeaderboardEntry = {
+      name,
+      grade,
+      totalCorrect,
+      badgesCount,
+      lastActive: today
+    };
+    
+    if (existingIndex >= 0) {
+      // Update
+      currentList[existingIndex] = newEntry;
+    } else {
+      // Add
+      currentList.push(newEntry);
+    }
+
+    // 3. Sort
+    const sortedList = currentList.sort((a, b) => b.totalCorrect - a.totalCorrect);
+
+    // 4. Save Cloud & Local
+    localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(sortedList));
+    await saveToCloud(LEADERBOARD_KEY, sortedList);
+
+    return sortedList;
+  } catch (e) {
+    console.error("Error updating leaderboard", e);
+    return [];
+  }
+};
+
+// --- Helpers ---
 
 export const getLast7DaysStats = (stats: UserStats) => {
   const days = [];
@@ -88,7 +192,6 @@ export const getLast7DaysStats = (stats: UserStats) => {
     const d = new Date();
     d.setDate(d.getDate() - i);
     const dateStr = d.toISOString().split('T')[0];
-    // Create short label (e.g., "Sat", "السبت")
     const label = new Intl.DateTimeFormat('ar-EG', { weekday: 'short' }).format(d);
     
     const dayData = stats.dailyHistory[dateStr] || { correct: 0, incorrect: 0 };
@@ -109,91 +212,4 @@ export const getBadgeStatus = (totalCorrect: number) => {
     { id: 3, name: 'الملك', required: 200, icon: '👑', unlocked: totalCorrect >= 200, color: 'text-purple-600 bg-purple-100 border-purple-200' },
     { id: 4, name: 'الأسطورة', required: 300, icon: '🏆', unlocked: totalCorrect >= 300, color: 'text-yellow-600 bg-yellow-100 border-yellow-200' },
   ];
-};
-
-// --- Leaderboard Logic ---
-
-export const getLeaderboard = (): LeaderboardEntry[] => {
-  try {
-    const stored = localStorage.getItem(LEADERBOARD_KEY);
-    if (stored) {
-      return JSON.parse(stored);
-    }
-    return []; 
-  } catch (e) {
-    return [];
-  }
-};
-
-// New function to register a player immediately upon entry or update existing
-export const registerNewPlayer = (name: string, grade: string) => {
-    try {
-        const currentList = getLeaderboard();
-        const existingIndex = currentList.findIndex(p => p.name === name);
-
-        // Load actual stats to ensure leaderboard reflects reality
-        const userStats = loadStats(name);
-
-        if (existingIndex === -1) {
-            // Only add if not exists
-            currentList.push({
-                name,
-                grade,
-                totalCorrect: userStats.totalCorrect, // Sync with saved stats
-                badgesCount: getBadgeStatus(userStats.totalCorrect).filter(b => b.unlocked).length,
-                lastActive: getTodayDateString()
-            });
-        } else {
-             // Update basic info
-             currentList[existingIndex].lastActive = getTodayDateString();
-             currentList[existingIndex].grade = grade;
-             // Ensure score is synced with personal storage
-             currentList[existingIndex].totalCorrect = userStats.totalCorrect;
-             currentList[existingIndex].badgesCount = getBadgeStatus(userStats.totalCorrect).filter(b => b.unlocked).length;
-        }
-        
-        // Sort
-        const sortedList = currentList.sort((a, b) => b.totalCorrect - a.totalCorrect);
-        localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(sortedList));
-    } catch (e) {
-        console.error("Error registering player", e);
-    }
-};
-
-export const updateLeaderboard = (name: string, grade: string, totalCorrect: number) => {
-  try {
-    const currentList = getLeaderboard();
-    const badgesCount = getBadgeStatus(totalCorrect).filter(b => b.unlocked).length;
-    
-    const existingIndex = currentList.findIndex(p => p.name === name);
-    
-    if (existingIndex >= 0) {
-      // Update existing player
-      currentList[existingIndex] = {
-        ...currentList[existingIndex],
-        totalCorrect, // This comes from the updated user stats
-        badgesCount,
-        lastActive: getTodayDateString(),
-        grade 
-      };
-    } else {
-      // Add new player
-      currentList.push({
-        name,
-        grade,
-        totalCorrect,
-        badgesCount,
-        lastActive: getTodayDateString()
-      });
-    }
-
-    // Sort by Total Correct (Descending)
-    const sortedList = currentList.sort((a, b) => b.totalCorrect - a.totalCorrect);
-
-    localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(sortedList));
-    return sortedList;
-  } catch (e) {
-    console.error("Error updating leaderboard", e);
-    return [];
-  }
 };

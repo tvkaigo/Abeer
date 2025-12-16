@@ -7,7 +7,7 @@ import LeaderboardScreen from './components/LeaderboardScreen';
 import UserEntryModal from './components/UserEntryModal';
 import { AppState, GameConfig, GameResult, Question, Difficulty, Operation } from './types';
 import { generateQuestions } from './services/mathService';
-import { updateUserStats, updateLeaderboard, registerNewPlayer } from './services/statsService';
+import { updateUserStats, registerNewPlayer } from './services/statsService';
 
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.WELCOME);
@@ -38,15 +38,19 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const handleUserEntry = (name: string) => {
+  const handleUserEntry = async (name: string) => {
     // Grade is removed from input, using default placeholder
     const grade = "-";
     const data = { name, grade };
     setUserData(data);
     localStorage.setItem('mathGeniusUserData', JSON.stringify(data));
     
-    // Register player in leaderboard immediately (will sync with existing stats if any)
-    registerNewPlayer(name, grade);
+    // Register player in leaderboard asynchronously
+    try {
+        await registerNewPlayer(name, grade);
+    } catch (e) {
+        console.error("Failed to register player online", e);
+    }
   };
 
   const handleStartGame = (config: GameConfig) => {
@@ -72,14 +76,16 @@ const App: React.FC = () => {
     setAppState(AppState.PLAYING);
   };
 
-  const handleEndGame = (result: GameResult) => {
+  const handleEndGame = async (result: GameResult) => {
     setGameResult(result);
     
-    // Update Persistent Stats (Analytics) - only if user is logged in
+    // Update Persistent Stats (Cloud & Analytics) - only if user is logged in
     if (userData) {
-        const updatedStats = updateUserStats(result, userData.name);
-        // Update Leaderboard with the NEW total correct count
-        updateLeaderboard(userData.name, userData.grade, updatedStats.totalCorrect);
+        try {
+            await updateUserStats(result, userData.name);
+        } catch (e) {
+            console.error("Failed to update cloud stats", e);
+        }
     }
 
     // Update Local Session High Score (only for standard 10 question games usually, but we can track all or segment)

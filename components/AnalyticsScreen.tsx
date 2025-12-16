@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Home, TrendingUp, Calendar, Award, CheckCircle2 } from 'lucide-react';
+import { Home, TrendingUp, Calendar, Award, CheckCircle2, Loader2 } from 'lucide-react';
 import { loadStats, getLast7DaysStats, getBadgeStatus } from '../services/statsService';
 import { UserStats } from '../types';
 
@@ -10,15 +10,28 @@ interface AnalyticsScreenProps {
 
 const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) => {
   const [stats, setStats] = useState<UserStats | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    if (userName) {
-        setStats(loadStats(userName));
-    }
+    const fetchStats = async () => {
+        if (userName) {
+            setIsLoading(true);
+            const data = await loadStats(userName);
+            setStats(data);
+            setIsLoading(false);
+        }
+    };
+    fetchStats();
   }, [userName]);
 
   if (!userName) return <div className="min-h-screen flex items-center justify-center p-4 text-center">يرجى تسجيل الدخول لعرض التحليلات.</div>;
-  if (!stats) return <div className="min-h-screen flex items-center justify-center">جاري التحميل...</div>;
+  
+  if (isLoading || !stats) return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-gray-50">
+          <Loader2 size={40} className="text-indigo-600 animate-spin" />
+          <p className="text-gray-500 font-medium">جاري جلب بياناتك...</p>
+      </div>
+  );
 
   const weeklyData = getLast7DaysStats(stats);
   const badges = getBadgeStatus(stats.totalCorrect);
