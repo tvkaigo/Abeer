@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Question, GameResult } from '../types';
 import { getOperationSymbol } from '../services/mathService';
-import { Timer, SkipForward, Send, CheckCircle2, XCircle, RotateCcw, AlarmClockOff, Home } from 'lucide-react';
+import { Timer, SkipForward, Send, CheckCircle2, XCircle, RotateCcw, AlarmClockOff, Home, Loader2, Save } from 'lucide-react';
 import { playCorrect, playIncorrect, playTick, playCompletion } from '../services/soundService';
 
 interface GameScreenProps {
@@ -9,11 +9,12 @@ interface GameScreenProps {
   onEndGame: (result: GameResult) => void;
   onExit: () => void;
   initialTime?: number; // Optional prop for custom time
+  isSaving?: boolean;
 }
 
 const DEFAULT_TIME = 2 * 60; // 2 minutes default
 
-const GameScreen: React.FC<GameScreenProps> = ({ questions, onEndGame, onExit, initialTime = DEFAULT_TIME }) => {
+const GameScreen: React.FC<GameScreenProps> = ({ questions, onEndGame, onExit, initialTime = DEFAULT_TIME, isSaving = false }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [userAnswer, setUserAnswer] = useState<string>('');
   const [timeLeft, setTimeLeft] = useState(initialTime);
@@ -25,30 +26,39 @@ const GameScreen: React.FC<GameScreenProps> = ({ questions, onEndGame, onExit, i
 
   const currentQuestion = questions[currentIndex];
 
+  // Focus management
   useEffect(() => {
-    if (inputRef.current && !isTimeUp) {
+    if (inputRef.current && !isTimeUp && !isSaving) {
       inputRef.current.focus();
     }
-  }, [currentIndex, attempts, isTimeUp]);
+  }, [currentIndex, attempts, isTimeUp, isSaving, feedback]);
 
+  // Timer Logic - Decoupled from render cycle for stability
   useEffect(() => {
-    if (timeLeft <= 0) {
-      if (!isTimeUp) {
-        setIsTimeUp(true);
-        playCompletion(false);
-      }
-      return;
-    }
-    
-    if (isTimeUp) return; // Stop timer if time is up state is active
+    if (isSaving || isTimeUp) return;
 
     const timer = setInterval(() => {
-      // Play tick sound (urgent if last 10 seconds)
-      playTick(timeLeft <= 10);
-      setTimeLeft((prev) => prev - 1);
+      setTimeLeft((prevTime) => {
+        if (prevTime <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        // Play tick sound (urgent if last 10 seconds)
+        // Check prevTime - 1 because we are about to decrement
+        playTick((prevTime - 1) <= 10);
+        return prevTime - 1;
+      });
     }, 1000);
+
     return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSaving, isTimeUp]);
+
+  // Handle Time End
+  useEffect(() => {
+    if (timeLeft === 0 && !isTimeUp) {
+      setIsTimeUp(true);
+      playCompletion(false);
+    }
   }, [timeLeft, isTimeUp]);
 
   const finishGame = (finalHistory?: Question[]) => {
@@ -81,7 +91,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ questions, onEndGame, onExit, i
     // Record as skipped/wrong
     const newHistory = [...history, { ...currentQuestion, userAnswer: parseInt(userAnswer) || 0, isCorrect: false }];
     setHistory(newHistory);
-    // Play sound for skip? Using incorrect for consistency
     playIncorrect();
     moveToNextQuestion(newHistory);
   };
@@ -150,12 +159,31 @@ const GameScreen: React.FC<GameScreenProps> = ({ questions, onEndGame, onExit, i
   const radius = 26;
   const circumference = 2 * Math.PI * radius;
   const timeElapsed = initialTime - timeLeft;
-  // Fills up as time runs out
-  const strokeDashoffset = circumference - (timeElapsed / initialTime) * circumference;
+  
+  // FIXED: Logic to make it COUNT DOWN (Start full, End empty)
+  // Offset 0 = Full Line
+  // Offset Circumference = Empty Line
+  const strokeDashoffset = (timeElapsed / initialTime) * circumference;
+  
   const isUrgent = timeLeft <= 10;
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4 relative overflow-hidden">
+      
+      {/* Saving Overlay */}
+      {isSaving && (
+        <div className="absolute inset-0 bg-white/90 backdrop-blur-sm z-50 flex flex-col items-center justify-center animate-fade-in">
+            <div className="relative">
+                <Loader2 size={64} className="text-indigo-600 animate-spin" />
+                <div className="absolute inset-0 flex items-center justify-center">
+                    <Save size={24} className="text-indigo-600" />
+                </div>
+            </div>
+            <h2 className="text-2xl font-bold text-indigo-900 mt-6 animate-pulse">جاري حفظ نتيجتك...</h2>
+            <p className="text-gray-500 mt-2">وتحديث قائمة الأبطال</p>
+        </div>
+      )}
+
       {/* Top Bar */}
       <div className="w-full max-w-2xl flex justify-between items-center mb-8 px-2 md:px-4 gap-2">
         
@@ -235,11 +263,14 @@ const GameScreen: React.FC<GameScreenProps> = ({ questions, onEndGame, onExit, i
                     value={userAnswer}
                     onChange={(e) => setUserAnswer(e.target.value)}
                     placeholder="؟"
-                    disabled={isTimeUp || feedback === 'correct' || (feedback === 'incorrect' && attempts > 1)}
+                    // FIXED: Use readOnly instead of disabled to prevent keyboard jumping on mobile
+                    readOnly={isTimeUp || feedback === 'correct' || (feedback === 'incorrect' && attempts > 1) || isSaving}
                     className={`w-full text-center text-4xl font-bold py-4 rounded-2xl border-4 outline-none transition-all
                         ${feedback === 'correct' ? 'border-green-500 bg-green-50 text-green-700' : 
                           feedback === 'incorrect' ? 'border-red-400 bg-red-50 text-red-700 placeholder-red-300' : 
-                          'border-indigo-100 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 text-gray-800'}`}
+                          'border-indigo-100 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 text-gray-800'}
+                        ${(isTimeUp || isSaving) ? 'opacity-50' : ''}  
+                    `}
                 />
                 
                 {/* Visual Feedback Icons */}
@@ -273,7 +304,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ questions, onEndGame, onExit, i
             <div className="flex gap-3">
                 <button
                     type="submit"
-                    disabled={feedback === 'correct' || isTimeUp}
+                    disabled={feedback === 'correct' || isTimeUp || isSaving}
                     className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xl font-bold py-4 rounded-xl shadow-lg hover:shadow-xl transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     تحقق <Send size={20} className="rtl:rotate-180" />
@@ -283,7 +314,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ questions, onEndGame, onExit, i
                     <button
                         type="button"
                         onClick={handleSkip}
-                        disabled={isTimeUp}
+                        disabled={isTimeUp || isSaving}
                         className="bg-gray-200 hover:bg-gray-300 text-gray-700 text-xl font-bold py-4 px-6 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
                     >
                         تخطي <SkipForward size={20} className="rtl:rotate-180" />
@@ -294,7 +325,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ questions, onEndGame, onExit, i
       </div>
 
       {/* Time Up Modal */}
-      {isTimeUp && (
+      {isTimeUp && !isSaving && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-pop-in">
           <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-sm w-full text-center border-4 border-red-100">
             <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6 text-red-500 animate-pulse">

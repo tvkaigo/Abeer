@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { GameResult } from '../types';
-import { RefreshCcw, Star, Trophy, Frown, Sparkles, Award, PartyPopper } from 'lucide-react';
+import { RefreshCcw, Star, Trophy, Frown, Sparkles, Award, PartyPopper, TrendingUp } from 'lucide-react';
 import { getAiFeedback } from '../services/geminiService';
 // @ts-ignore
 import confetti from 'canvas-confetti';
@@ -11,15 +11,18 @@ interface ResultScreenProps {
   onRestart: () => void;
   isNewHighScore: boolean;
   userName?: string;
+  totalCumulativeScore?: number;
 }
 
-const ResultScreen: React.FC<ResultScreenProps> = ({ result, difficulty, onRestart, isNewHighScore, userName }) => {
+const ResultScreen: React.FC<ResultScreenProps> = ({ result, difficulty, onRestart, isNewHighScore, userName, totalCumulativeScore }) => {
   const [aiMessage, setAiMessage] = useState<string>('');
   const [loadingAi, setLoadingAi] = useState(false);
+  const animationFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
     // Advanced Confetti Logic
     const isPerfect = result.score === result.totalQuestions;
+    let interval: any = null;
     
     if (isPerfect || isNewHighScore) {
        // Fireworks effect for perfect score or high score
@@ -29,7 +32,7 @@ const ResultScreen: React.FC<ResultScreenProps> = ({ result, difficulty, onResta
        
        const randomInRange = (min: number, max: number) => Math.random() * (max - min) + min;
 
-       const interval: any = setInterval(function() {
+       interval = setInterval(function() {
           const timeLeft = animationEnd - Date.now();
       
           if (timeLeft <= 0) {
@@ -42,15 +45,13 @@ const ResultScreen: React.FC<ResultScreenProps> = ({ result, difficulty, onResta
           confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 } });
         }, 250);
 
-        return () => clearInterval(interval);
-
     } else if (result.score >= 4) {
       // Standard side cannons for good score
       const duration = 3000;
       const end = Date.now() + duration;
       const colors = ['#6366f1', '#a855f7', '#ec4899', '#f59e0b'];
 
-      (function frame() {
+      const frame = () => {
         confetti({
           particleCount: 4,
           angle: 60,
@@ -67,10 +68,17 @@ const ResultScreen: React.FC<ResultScreenProps> = ({ result, difficulty, onResta
         });
 
         if (Date.now() < end) {
-          requestAnimationFrame(frame);
+          animationFrameRef.current = requestAnimationFrame(frame);
         }
-      }());
+      };
+      
+      frame();
     }
+
+    return () => {
+        if (interval) clearInterval(interval);
+        if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    };
   }, [result.score, result.totalQuestions, isNewHighScore]);
 
   
@@ -145,11 +153,24 @@ const ResultScreen: React.FC<ResultScreenProps> = ({ result, difficulty, onResta
           {message}
         </h2>
 
+        {/* Score Card */}
         <div className="my-8 relative">
             <div className="text-gray-500 font-medium text-lg uppercase tracking-widest mb-2">النتيجة النهائية</div>
-            <div className="text-7xl font-black text-indigo-900 drop-shadow-sm">
+            <div className="text-7xl font-black text-indigo-900 drop-shadow-sm flex items-center justify-center">
                 {result.score}<span className="text-3xl text-gray-400">/{result.totalQuestions}</span>
             </div>
+            
+            {/* Total Accumulative Score Badge */}
+            {totalCumulativeScore !== undefined && totalCumulativeScore > 0 && (
+              <div className="mt-4 bg-indigo-50 border border-indigo-100 rounded-xl p-3 flex items-center justify-center gap-2 animate-fade-in-up">
+                 <div className="bg-indigo-100 p-1.5 rounded-full text-indigo-600">
+                    <TrendingUp size={16} />
+                 </div>
+                 <div className="text-sm text-indigo-800 font-bold">
+                    مجموعك الكلي الآن: <span className="text-lg">{totalCumulativeScore}</span> إجابة صحيحة
+                 </div>
+              </div>
+            )}
         </div>
 
         <div className="space-y-4">

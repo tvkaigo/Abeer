@@ -1,4 +1,4 @@
-import { UserStats, GameResult, LeaderboardEntry } from '../types';
+import { UserStats, GameResult, LeaderboardEntry, PREDEFINED_USERS } from '../types';
 
 // Unique bucket ID for this specific app instance to ensure all users share the same data
 const CLOUD_API_URL = 'https://kvdb.io/beta/math-genius-live-v1';
@@ -21,8 +21,9 @@ export const getInitialStats = (): UserStats => ({
 
 const fetchFromCloud = async <T>(key: string): Promise<T | null> => {
   try {
-    // Add timestamp to prevent caching
-    const response = await fetch(`${CLOUD_API_URL}/${key}?t=${Date.now()}`);
+    // Add timestamp to prevent caching and ENCODE the key for Arabic support
+    const encodedKey = encodeURIComponent(key);
+    const response = await fetch(`${CLOUD_API_URL}/${encodedKey}?t=${Date.now()}`);
     if (response.status === 404) return null;
     if (!response.ok) throw new Error('Network response was not ok');
     return await response.json();
@@ -34,7 +35,8 @@ const fetchFromCloud = async <T>(key: string): Promise<T | null> => {
 
 const saveToCloud = async (key: string, data: any): Promise<void> => {
   try {
-    await fetch(`${CLOUD_API_URL}/${key}`, {
+    const encodedKey = encodeURIComponent(key);
+    await fetch(`${CLOUD_API_URL}/${encodedKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -70,20 +72,33 @@ export const loadStats = async (username: string): Promise<UserStats> => {
 export const updateUserStats = async (result: GameResult, username: string): Promise<UserStats> => {
   if (!username) return getInitialStats();
 
-  // Load latest stats from cloud before updating
+  // 1. Load latest individual stats
   const stats = await loadStats(username);
   
+  // 2. SAFETY SYNC: Check Leaderboard to recover lost progress
+  // If local stats file was reset/lost but leaderboard has higher score, resume from leaderboard
+  try {
+      const leaderboard = await getLeaderboard(true);
+      const userEntry = leaderboard.find(p => p.name === username);
+      if (userEntry && userEntry.totalCorrect > stats.totalCorrect) {
+          console.log(`Restoring stats from leaderboard: ${stats.totalCorrect} -> ${userEntry.totalCorrect}`);
+          stats.totalCorrect = userEntry.totalCorrect;
+      }
+  } catch (e) {
+      console.warn("Leaderboard sync check failed, proceeding with local stats");
+  }
+
   const today = getTodayDateString();
   const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
 
-  // 1. Update Totals
+  // 3. Apply New Game Results
   const correctCount = result.score;
   const incorrectCount = result.totalQuestions - result.score;
   
   stats.totalCorrect += correctCount;
   stats.totalIncorrect += incorrectCount;
 
-  // 2. Update Streak
+  // 4. Update Streak
   if (stats.lastPlayedDate === today) {
     // Already played today
   } else if (stats.lastPlayedDate === yesterday) {
@@ -98,7 +113,7 @@ export const updateUserStats = async (result: GameResult, username: string): Pro
   }
   stats.lastPlayedDate = today;
 
-  // 3. Update Daily History
+  // 5. Update Daily History
   if (!stats.dailyHistory[today]) {
     stats.dailyHistory[today] = { date: today, correct: 0, incorrect: 0 };
   }
@@ -106,11 +121,11 @@ export const updateUserStats = async (result: GameResult, username: string): Pro
   stats.dailyHistory[today].correct += correctCount;
   stats.dailyHistory[today].incorrect += incorrectCount;
 
-  // 4. Save to Cloud & Local
+  // 6. Save to Cloud & Local
   localStorage.setItem(`${USER_STATS_PREFIX}${username}`, JSON.stringify(stats));
   await saveToCloud(`${USER_STATS_PREFIX}${username}`, stats);
 
-  // 5. Trigger Leaderboard Update immediately
+  // 7. Trigger Leaderboard Update immediately
   await updateLeaderboard(username, "-", stats.totalCorrect);
 
   return stats;
@@ -119,50 +134,83 @@ export const updateUserStats = async (result: GameResult, username: string): Pro
 // --- Leaderboard Logic ---
 
 export const getLeaderboard = async (skipCache: boolean = false): Promise<LeaderboardEntry[]> => {
+  let currentList: LeaderboardEntry[] = [];
+
   // 1. Try Cloud
   const cloudData = await fetchFromCloud<LeaderboardEntry[]>(LEADERBOARD_KEY);
   if (cloudData) {
+    currentList = cloudData;
     localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(cloudData));
-    return cloudData;
+  } else if (!skipCache) {
+    // Fallback Local
+    try {
+      const local = localStorage.getItem(LEADERBOARD_KEY);
+      if (local) currentList = JSON.parse(local);
+    } catch (e) {
+      console.error("Local leaderboard load failed", e);
+    }
   }
 
-  // 2. Fallback Local (only if not skipping cache)
-  if (!skipCache) {
-      try {
-        const local = localStorage.getItem(LEADERBOARD_KEY);
-        if (local) return JSON.parse(local);
-      } catch (e) {
-        console.error("Local leaderboard load failed", e);
+  // 2. Merge with Predefined Users
+  // This ensures that all students appear in the list even if they haven't played yet
+  const existingMap = new Map(currentList.map(p => [p.name, p]));
+  
+  PREDEFINED_USERS.forEach(name => {
+      if (!existingMap.has(name)) {
+          currentList.push({
+              name,
+              grade: '-',
+              totalCorrect: 0,
+              badgesCount: 0,
+              lastActive: 'غير نشط' // Not active yet
+          });
       }
-  }
-  return [];
+  });
+
+  // 3. Sort by Score (Desc) then by Name (Asc) for stability
+  return currentList.sort((a, b) => {
+     if (b.totalCorrect !== a.totalCorrect) {
+         return b.totalCorrect - a.totalCorrect;
+     }
+     return a.name.localeCompare(b.name, 'ar');
+  });
 };
 
 export const registerNewPlayer = async (name: string, grade: string) => {
   // Always load stats from cloud to ensure we have the real totalCorrect
-  // This handles the case where a user plays on Device A, then logs in on Device B.
   const stats = await loadStats(name);
   
-  // Update the leaderboard with their current stats (even if 0)
+  // Only update leaderboard if we have data or to initialize, 
+  // but updateLeaderboard now handles safety checks.
   await updateLeaderboard(name, grade, stats.totalCorrect);
 };
 
 export const updateLeaderboard = async (name: string, grade: string, totalCorrect: number) => {
   try {
     // 1. Fetch Fresh Leaderboard from Cloud
-    // We try to get the absolute latest to avoid overwriting others
-    let currentList = await getLeaderboard(true) || [];
-    
-    // 2. Calculate badges
-    const badgesCount = getBadgeStatus(totalCorrect).filter(b => b.unlocked).length;
+    let currentList = await getLeaderboard(true);
     
     const existingIndex = currentList.findIndex(p => p.name === name);
     const today = getTodayDateString();
 
+    let finalTotalCorrect = totalCorrect;
+    
+    // Safety check: Ensure Monotonicity (Score should never go down)
+    // This protects against overwriting high scores with 0 if local data was lost
+    if (existingIndex >= 0) {
+        const existingEntry = currentList[existingIndex];
+        if (totalCorrect < existingEntry.totalCorrect) {
+            console.log(`Preventing score reset for ${name}: New=${totalCorrect}, Kept=${existingEntry.totalCorrect}`);
+            finalTotalCorrect = existingEntry.totalCorrect;
+        }
+    }
+
+    const badgesCount = getBadgeStatus(finalTotalCorrect).filter(b => b.unlocked).length;
+
     const newEntry: LeaderboardEntry = {
       name,
       grade,
-      totalCorrect,
+      totalCorrect: finalTotalCorrect,
       badgesCount,
       lastActive: today
     };
@@ -175,8 +223,13 @@ export const updateLeaderboard = async (name: string, grade: string, totalCorrec
       currentList.push(newEntry);
     }
 
-    // 3. Sort by Score
-    const sortedList = currentList.sort((a, b) => b.totalCorrect - a.totalCorrect);
+    // 3. Sort - CRITICAL: Must match getLeaderboard sort logic to ensure consistent ranking
+    const sortedList = currentList.sort((a, b) => {
+        if (b.totalCorrect !== a.totalCorrect) {
+            return b.totalCorrect - a.totalCorrect;
+        }
+        return a.name.localeCompare(b.name, 'ar');
+    });
 
     // 4. Save back to Cloud
     await saveToCloud(LEADERBOARD_KEY, sortedList);

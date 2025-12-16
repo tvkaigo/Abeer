@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Home, Trophy, Medal, Crown, Sparkles, Loader2, RefreshCw } from 'lucide-react';
+import { Home, Trophy, Medal, Crown, Sparkles, Loader2, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { getLeaderboard, getBadgeStatus } from '../services/statsService';
 import { LeaderboardEntry } from '../types';
 
@@ -76,7 +76,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                 </div>
             </div>
             <h1 className="text-2xl font-black text-gray-800">قائمة الأبطال</h1>
-            <p className="text-gray-500 text-sm">نتائج جميع اللاعبين</p>
+            <p className="text-gray-500 text-sm">الترتيب حسب مجموع الإجابات الصحيحة</p>
           </div>
           
           <button 
@@ -104,7 +104,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                         <tr>
                             <th className="py-5 px-4 text-center w-16">#</th>
                             <th className="py-5 px-4 text-right">اللاعب</th>
-                            <th className="py-5 px-4 text-center">مجموع النقاط</th>
+                            <th className="py-5 px-4 text-center">الإجابات الصحيحة</th>
                             <th className="py-5 px-4 text-center">الجوائز المكتسبة</th>
                         </tr>
                     </thead>
@@ -113,8 +113,9 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                             const isCurrentUser = player.name === currentUser;
                             const unlockedBadges = getBadgeStatus(player.totalCorrect).filter(b => b.unlocked);
 
+                            // Using player name as key for better reconciliation than index
                             return (
-                                <tr key={index} className={getRowStyle(index, isCurrentUser)}>
+                                <tr key={player.name} className={getRowStyle(index, isCurrentUser)}>
                                     <td className="py-4 px-4 flex justify-center items-center h-full">
                                         {getRankIcon(index)}
                                     </td>
@@ -127,11 +128,14 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                                         </div>
                                     </td>
                                     <td className="py-4 px-4 text-center">
-                                        <div className="inline-block bg-indigo-50 px-4 py-1 rounded-xl">
-                                            <span className="font-black text-xl text-indigo-600">
-                                                {player.totalCorrect}
-                                            </span>
-                                            <span className="text-xs text-indigo-400 block -mt-1">نقطة</span>
+                                        <div className="inline-flex flex-col items-center justify-center bg-indigo-50 px-4 py-1.5 rounded-xl min-w-[80px]">
+                                            <div className="flex items-center gap-1">
+                                                <span className="font-black text-xl text-indigo-600">
+                                                    {player.totalCorrect}
+                                                </span>
+                                                <CheckCircle2 size={14} className="text-indigo-400" />
+                                            </div>
+                                            <span className="text-[10px] text-indigo-400 font-bold -mt-0.5">إجابة</span>
                                         </div>
                                     </td>
                                     <td className="py-4 px-4 text-center">
@@ -174,7 +178,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
         {/* Motivation */}
         <div className="mt-8 text-center bg-white/50 backdrop-blur-sm p-4 rounded-2xl border border-white shadow-sm">
             <p className="text-indigo-800 font-medium">
-                💡 القائمة تتحدث تلقائياً. يمكنك الضغط على زر التحديث في الأعلى.
+                💡 القائمة ترتب الأبطال حسب مجموع إجاباتهم الصحيحة المتراكمة.
             </p>
         </div>
 

@@ -1,19 +1,10 @@
 import React, { useState } from 'react';
 import { User, ArrowLeft, ChevronDown } from 'lucide-react';
+import { PREDEFINED_USERS } from '../types';
 
 interface UserEntryModalProps {
   onSubmit: (name: string) => void;
 }
-
-const PREDEFINED_USERS = [
-  'عبير محمد',
-  'عبير حنش',
-  'ندى',
-  'اسماء',
-  'ريم',
-  'منال',
-  'عائشه'
-];
 
 const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSubmit }) => {
   const [name, setName] = useState('');

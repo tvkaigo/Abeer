@@ -62,3 +62,13 @@ export interface LeaderboardEntry {
   badgesCount: number;
   lastActive: string;
 }
+
+export const PREDEFINED_USERS = [
+  'عبير محمد',
+  'عبير حنش',
+  'ندى',
+  'اسماء',
+  'ريم',
+  'منال',
+  'عائشه'
+];

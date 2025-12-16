@@ -16,6 +16,8 @@ const App: React.FC = () => {
   const [currentConfig, setCurrentConfig] = useState<GameConfig | null>(null);
   const [highScore, setHighScore] = useState<number>(0);
   const [isNewHighScore, setIsNewHighScore] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [currentTotalScore, setCurrentTotalScore] = useState<number>(0);
   
   // Track custom time limit (e.g., 60s for Quick Test)
   const [timeLimit, setTimeLimit] = useState<number>(120);
@@ -86,12 +88,14 @@ const App: React.FC = () => {
   };
 
   const handleEndGame = async (result: GameResult) => {
+    setIsSaving(true);
     setGameResult(result);
     
     // Update Persistent Stats (Cloud & Analytics) - only if user is logged in
     if (userData) {
         try {
-            await updateUserStats(result, userData.name);
+            const stats = await updateUserStats(result, userData.name);
+            setCurrentTotalScore(stats.totalCorrect);
         } catch (e) {
             console.error("Failed to update cloud stats", e);
         }
@@ -106,6 +110,7 @@ const App: React.FC = () => {
       setIsNewHighScore(false);
     }
     
+    setIsSaving(false);
     setAppState(AppState.RESULTS);
   };
 
@@ -164,6 +169,7 @@ const App: React.FC = () => {
           onEndGame={handleEndGame}
           onExit={handleRestart}
           initialTime={timeLimit}
+          isSaving={isSaving}
         />
       )}
 
@@ -174,6 +180,7 @@ const App: React.FC = () => {
           onRestart={handleRestart} 
           isNewHighScore={isNewHighScore}
           userName={userData?.name}
+          totalCumulativeScore={currentTotalScore}
         />
       )}
     </div>
