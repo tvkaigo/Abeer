@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Home, Trophy, Medal, Crown, Sparkles, Loader2, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { Home, Trophy, Medal, Crown, Sparkles, Loader2, RefreshCw, CheckCircle2, User } from 'lucide-react';
 import { getLeaderboard, getBadgeStatus } from '../services/statsService';
 import { LeaderboardEntry } from '../types';
 
@@ -37,20 +37,34 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
 
   const getRankIcon = (index: number) => {
     switch (index) {
-      case 0: return <Crown size={24} className="text-yellow-500 animate-bounce" fill="currentColor" />;
-      case 1: return <Medal size={24} className="text-gray-400" fill="currentColor" />;
-      case 2: return <Medal size={24} className="text-amber-700" fill="currentColor" />;
-      default: return <span className="font-bold text-gray-500 w-6 text-center">{index + 1}</span>;
+      case 0: return (
+        <div className="relative inline-block">
+            <Crown size={32} className="text-yellow-400 drop-shadow-sm animate-bounce" fill="currentColor" />
+            <div className="absolute -top-1 -right-1 animate-pulse"><Sparkles size={12} className="text-yellow-300" /></div>
+        </div>
+      );
+      case 1: return <Medal size={28} className="text-slate-400 drop-shadow-sm" fill="currentColor" />; // Silver
+      case 2: return <Medal size={28} className="text-amber-700 drop-shadow-sm" fill="currentColor" />; // Bronze
+      default: return (
+        <div className="w-8 h-8 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-400 font-black shadow-inner mx-auto text-sm">
+            {index + 1}
+        </div>
+      );
     }
   };
 
   const getRowStyle = (index: number, isCurrentUser: boolean) => {
-    let base = "border-b border-gray-100 hover:bg-indigo-50 transition-colors duration-300";
-    if (isCurrentUser) base += " bg-indigo-50 border-indigo-200 ring-2 ring-indigo-100 ring-inset";
+    let base = "border-b border-gray-50 hover:bg-indigo-50/60 transition-all duration-300 group relative";
     
-    if (index === 0) return `${base} bg-gradient-to-r from-yellow-50 to-white`;
-    if (index === 1) return `${base} bg-gradient-to-r from-gray-50 to-white`;
-    if (index === 2) return `${base} bg-gradient-to-r from-orange-50 to-white`;
+    if (isCurrentUser) {
+        base += " bg-indigo-50/80 border-l-4 border-l-indigo-500";
+    } else {
+        // Subtle gradients for top 3
+        if (index === 0) base += " bg-gradient-to-r from-yellow-50/60 via-white to-white";
+        else if (index === 1) base += " bg-gradient-to-r from-slate-50/60 via-white to-white";
+        else if (index === 2) base += " bg-gradient-to-r from-orange-50/60 via-white to-white";
+        else base += " bg-white";
+    }
     
     return base;
   };
@@ -60,10 +74,10 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
       <div className="w-full max-w-4xl animate-pop-in">
         
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-6 px-2">
           <button 
             onClick={onBack}
-            className="bg-white p-3 rounded-full shadow-md text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 transition-all hover:scale-110"
+            className="bg-white p-3 rounded-2xl shadow-sm text-gray-500 hover:text-indigo-600 hover:shadow-md transition-all hover:scale-105 active:scale-95 border border-gray-100"
           >
             <Home size={24} />
           </button>
@@ -75,14 +89,14 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                   <Sparkles size={16} className="text-yellow-500 animate-spin-slow" />
                 </div>
             </div>
-            <h1 className="text-2xl font-black text-gray-800">قائمة الأبطال</h1>
-            <p className="text-gray-500 text-sm">الترتيب حسب مجموع الإجابات الصحيحة</p>
+            <h1 className="text-3xl font-black text-slate-800 tracking-tight">قائمة الأبطال</h1>
+            <p className="text-slate-500 text-sm font-medium">الترتيب حسب مجموع الإجابات الصحيحة</p>
           </div>
           
           <button 
             onClick={handleRefresh}
             disabled={isRefreshing}
-            className={`bg-white p-3 rounded-full shadow-md text-indigo-600 hover:bg-indigo-50 transition-all ${isRefreshing ? 'opacity-70 cursor-not-allowed' : 'hover:scale-110'}`}
+            className={`bg-white p-3 rounded-2xl shadow-sm text-indigo-600 hover:shadow-md transition-all border border-gray-100 ${isRefreshing ? 'opacity-70 cursor-not-allowed' : 'hover:scale-105 active:scale-95'}`}
             title="تحديث القائمة"
           >
             <RefreshCw size={24} className={isRefreshing ? 'animate-spin' : ''} />
@@ -90,25 +104,25 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
         </div>
 
         {/* Table Card */}
-        <div className="bg-white rounded-3xl shadow-xl border border-gray-200 overflow-hidden min-h-[300px] relative">
+        <div className="bg-white rounded-3xl shadow-2xl border border-gray-100 overflow-hidden min-h-[400px] relative">
             {isLoading && leaders.length === 0 ? (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/80 z-10">
-                    <Loader2 size={48} className="text-indigo-600 animate-spin mb-4" />
-                    <p className="text-gray-500 font-medium">جاري تحديث النتائج...</p>
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/90 z-20 backdrop-blur-sm">
+                    <Loader2 size={56} className="text-indigo-600 animate-spin mb-4" />
+                    <p className="text-indigo-900 font-bold text-lg animate-pulse">جاري جلب أحدث النتائج...</p>
                 </div>
             ) : null}
 
             <div className="overflow-x-auto">
-                <table className="w-full">
-                    <thead className="bg-indigo-600 text-white">
-                        <tr>
-                            <th className="py-5 px-4 text-center w-16">#</th>
-                            <th className="py-5 px-4 text-right">اللاعب</th>
-                            <th className="py-5 px-4 text-center">الإجابات الصحيحة</th>
-                            <th className="py-5 px-4 text-center">الجوائز المكتسبة</th>
+                <table className="w-full border-collapse">
+                    <thead>
+                        <tr className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white shadow-md">
+                            <th className="py-6 px-4 text-center w-24 font-bold text-lg opacity-95">#</th>
+                            <th className="py-6 px-4 text-right font-bold text-lg opacity-95">اللاعب</th>
+                            <th className="py-6 px-4 text-center font-bold text-lg opacity-95 w-48">الإجابات الصحيحة</th>
+                            <th className="py-6 px-4 text-center font-bold text-lg opacity-95">الجوائز المكتسبة</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody className="divide-y divide-gray-50">
                         {leaders.map((player, index) => {
                             const isCurrentUser = player.name === currentUser;
                             const unlockedBadges = getBadgeStatus(player.totalCorrect).filter(b => b.unlocked);
@@ -116,43 +130,54 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                             // Using player name as key for better reconciliation than index
                             return (
                                 <tr key={player.name} className={getRowStyle(index, isCurrentUser)}>
-                                    <td className="py-4 px-4 flex justify-center items-center h-full">
+                                    <td className="py-5 px-4 flex justify-center items-center h-full">
                                         {getRankIcon(index)}
                                     </td>
-                                    <td className="py-4 px-4">
+                                    <td className="py-5 px-4">
                                         <div className="flex flex-col">
-                                            <span className={`font-bold text-lg ${isCurrentUser ? 'text-indigo-700' : 'text-gray-800'}`}>
-                                                {player.name} {isCurrentUser && <span className="text-xs bg-indigo-200 text-indigo-800 px-2 py-0.5 rounded-full mr-1">أنت</span>}
-                                            </span>
-                                            <span className="text-xs text-gray-400">آخر ظهور: {player.lastActive}</span>
+                                            <div className="flex items-center gap-2">
+                                                <span className={`font-bold text-xl ${isCurrentUser ? 'text-indigo-700' : 'text-slate-800'}`}>
+                                                    {player.name}
+                                                </span>
+                                                {isCurrentUser && (
+                                                    <span className="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-bold border border-indigo-200">
+                                                        أنت
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="flex items-center gap-1 text-xs text-gray-400 mt-1">
+                                                <span>آخر ظهور:</span>
+                                                <span dir="ltr">{player.lastActive}</span>
+                                            </div>
                                         </div>
                                     </td>
-                                    <td className="py-4 px-4 text-center">
-                                        <div className="inline-flex flex-col items-center justify-center bg-indigo-50 px-4 py-1.5 rounded-xl min-w-[80px]">
-                                            <div className="flex items-center gap-1">
-                                                <span className="font-black text-xl text-indigo-600">
+                                    <td className="py-5 px-4 text-center">
+                                        <div className="inline-flex flex-col items-center justify-center bg-indigo-50/80 px-6 py-2 rounded-2xl min-w-[100px] border border-indigo-100 shadow-sm transition-transform group-hover:scale-105">
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="font-black text-2xl text-indigo-600 tracking-tight">
                                                     {player.totalCorrect}
                                                 </span>
-                                                <CheckCircle2 size={14} className="text-indigo-400" />
+                                                <CheckCircle2 size={16} className="text-indigo-400" strokeWidth={2.5} />
                                             </div>
-                                            <span className="text-[10px] text-indigo-400 font-bold -mt-0.5">إجابة</span>
+                                            <span className="text-[11px] text-indigo-400 font-bold -mt-1">إجابة صحيحة</span>
                                         </div>
                                     </td>
-                                    <td className="py-4 px-4 text-center">
-                                        <div className="flex items-center justify-center gap-2 flex-wrap max-w-[200px] mx-auto">
+                                    <td className="py-5 px-4 text-center">
+                                        <div className="flex items-center justify-center gap-2 flex-wrap max-w-[240px] mx-auto min-h-[40px]">
                                             {unlockedBadges.length > 0 ? (
                                                 unlockedBadges.map((badge) => (
-                                                    <div key={badge.id} className="group relative cursor-help">
+                                                    <div key={badge.id} className="group/badge relative cursor-help">
                                                         <span className="text-2xl filter drop-shadow-sm hover:scale-125 transition-transform block" role="img" aria-label={badge.name}>
                                                             {badge.icon}
                                                         </span>
-                                                        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">
+                                                        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-gray-900 text-white text-xs font-bold rounded-lg opacity-0 group-hover/badge:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-30 shadow-xl">
                                                             {badge.name}
+                                                            <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
                                                         </span>
                                                     </div>
                                                 ))
                                             ) : (
-                                                <span className="text-xs text-gray-300 flex items-center gap-1">
+                                                <span className="text-xs text-gray-300 font-medium bg-gray-50 px-3 py-1 rounded-full flex items-center gap-1 border border-gray-100">
                                                     لا يوجد <span className="opacity-50">🔒</span>
                                                 </span>
                                             )}
@@ -163,10 +188,14 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                         })}
                         {leaders.length === 0 && !isLoading && (
                             <tr>
-                                <td colSpan={4} className="py-12 text-center text-gray-500 flex flex-col items-center justify-center gap-2">
-                                    <Trophy size={48} className="text-gray-200" />
-                                    <p>لا يوجد لاعبين في القائمة حتى الآن.</p>
-                                    <p className="text-sm text-gray-400">سجل الدخول لتكون الأول!</p>
+                                <td colSpan={4} className="py-20 text-center text-gray-500">
+                                    <div className="flex flex-col items-center justify-center gap-3">
+                                        <div className="bg-gray-100 p-4 rounded-full">
+                                            <Trophy size={48} className="text-gray-300" />
+                                        </div>
+                                        <p className="font-bold text-lg text-gray-600">القائمة فارغة حالياً</p>
+                                        <p className="text-sm text-gray-400">كن أول من يسجل اسمه في لوحة الشرف!</p>
+                                    </div>
                                 </td>
                             </tr>
                         )}
@@ -175,11 +204,12 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
             </div>
         </div>
 
-        {/* Motivation */}
-        <div className="mt-8 text-center bg-white/50 backdrop-blur-sm p-4 rounded-2xl border border-white shadow-sm">
-            <p className="text-indigo-800 font-medium">
-                💡 القائمة ترتب الأبطال حسب مجموع إجاباتهم الصحيحة المتراكمة.
-            </p>
+        {/* Footer/Motivation */}
+        <div className="mt-6 text-center">
+            <div className="inline-flex items-center gap-2 bg-white/60 backdrop-blur-sm px-6 py-3 rounded-full border border-white shadow-sm text-indigo-800 font-medium text-sm">
+                <Sparkles size={16} className="text-yellow-500" />
+                 القائمة ترتب الأبطال حسب مجموع إجاباتهم الصحيحة المتراكمة. استمر في اللعب لتتصدر!
+            </div>
         </div>
 
       </div>

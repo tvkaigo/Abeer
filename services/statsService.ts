@@ -1,9 +1,9 @@
 import { UserStats, GameResult, LeaderboardEntry, PREDEFINED_USERS } from '../types';
 
-// Unique bucket ID for this specific app instance to ensure all users share the same data
-const CLOUD_API_URL = 'https://kvdb.io/beta/math-genius-live-v1';
+// Using v4 bucket as established
+const CLOUD_API_URL = 'https://kvdb.io/beta/math-genius-live-v4';
 const USER_STATS_PREFIX = 'stats_';
-const LEADERBOARD_KEY = 'leaderboard_global_v1';
+const LEADERBOARD_KEY = 'leaderboard_global';
 
 const getTodayDateString = (): string => {
   return new Date().toISOString().split('T')[0];
@@ -21,14 +21,14 @@ export const getInitialStats = (): UserStats => ({
 
 const fetchFromCloud = async <T>(key: string): Promise<T | null> => {
   try {
-    // Add timestamp to prevent caching and ENCODE the key for Arabic support
     const encodedKey = encodeURIComponent(key);
+    // Add timestamp to bypass cache
     const response = await fetch(`${CLOUD_API_URL}/${encodedKey}?t=${Date.now()}`);
     if (response.status === 404) return null;
     if (!response.ok) throw new Error('Network response was not ok');
     return await response.json();
   } catch (e) {
-    console.warn(`Cloud fetch failed for ${key}, falling back to local`, e);
+    console.warn(`Cloud fetch failed for ${key}`, e);
     return null;
   }
 };
@@ -51,64 +51,54 @@ const saveToCloud = async (key: string, data: any): Promise<void> => {
 export const loadStats = async (username: string): Promise<UserStats> => {
   if (!username) return getInitialStats();
   
-  // 1. Try Cloud first (Source of Truth)
+  // Try cloud
   const cloudStats = await fetchFromCloud<UserStats>(`${USER_STATS_PREFIX}${username}`);
   if (cloudStats) {
-    localStorage.setItem(`${USER_STATS_PREFIX}${username}`, JSON.stringify(cloudStats));
     return cloudStats;
   }
-
-  // 2. Fallback to Local if cloud fails or doesn't exist
-  try {
-    const local = localStorage.getItem(`${USER_STATS_PREFIX}${username}`);
-    if (local) return JSON.parse(local);
-  } catch (e) {
-    console.error("Local load failed", e);
-  }
-
+  
   return getInitialStats();
 };
 
 export const updateUserStats = async (result: GameResult, username: string): Promise<UserStats> => {
   if (!username) return getInitialStats();
 
-  // 1. Load latest individual stats
-  const stats = await loadStats(username);
+  // 1. Load User's detailed stats
+  let stats = await loadStats(username);
   
-  // 2. SAFETY SYNC: Check Leaderboard to recover lost progress
-  // If local stats file was reset/lost but leaderboard has higher score, resume from leaderboard
-  try {
-      const leaderboard = await getLeaderboard(true);
-      const userEntry = leaderboard.find(p => p.name === username);
-      if (userEntry && userEntry.totalCorrect > stats.totalCorrect) {
-          console.log(`Restoring stats from leaderboard: ${stats.totalCorrect} -> ${userEntry.totalCorrect}`);
-          stats.totalCorrect = userEntry.totalCorrect;
-      }
-  } catch (e) {
-      console.warn("Leaderboard sync check failed, proceeding with local stats");
-  }
-
   const today = getTodayDateString();
   const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
 
-  // 3. Apply New Game Results
-  const correctCount = result.score;
-  const incorrectCount = result.totalQuestions - result.score;
+  // 2. CRITICAL FIX: Get the TRUE accumulated score from Leaderboard/Stats reconciliation.
+  // We do not trust 'stats.totalCorrect' alone because it might be from a fresh/empty file.
+  // We fetch the leaderboard (which now syncs with everything) to find the max valid score.
+  let currentTotalCorrect = stats.totalCorrect;
   
-  stats.totalCorrect += correctCount;
-  stats.totalIncorrect += incorrectCount;
+  try {
+      // We use false here to avoid a double-heavy sync, relying on the fact that loadStats above 
+      // just got the user's specific file. However, to be ultra safe against race conditions:
+      const leaderboard = await getLeaderboard(false); 
+      const userEntry = leaderboard.find(p => p.name === username);
+      if (userEntry) {
+          currentTotalCorrect = Math.max(currentTotalCorrect, userEntry.totalCorrect);
+      }
+  } catch (e) {
+      console.warn("Could not sync with leaderboard for baseline", e);
+  }
+
+  // 3. Add New Points
+  const pointsEarned = result.score;
+  const newTotalCorrect = currentTotalCorrect + pointsEarned;
+  
+  stats.totalCorrect = newTotalCorrect;
+  stats.totalIncorrect += (result.totalQuestions - result.score);
 
   // 4. Update Streak
-  if (stats.lastPlayedDate === today) {
-    // Already played today
-  } else if (stats.lastPlayedDate === yesterday) {
-    stats.streak += 1;
-  } else {
-    // Check if it's not the very first game
-    if (stats.lastPlayedDate) {
-        stats.streak = 1;
+  if (stats.lastPlayedDate !== today) {
+    if (stats.lastPlayedDate === yesterday) {
+        stats.streak += 1;
     } else {
-        stats.streak = 1; 
+        stats.streak = 1;
     }
   }
   stats.lastPlayedDate = today;
@@ -117,113 +107,134 @@ export const updateUserStats = async (result: GameResult, username: string): Pro
   if (!stats.dailyHistory[today]) {
     stats.dailyHistory[today] = { date: today, correct: 0, incorrect: 0 };
   }
-  
-  stats.dailyHistory[today].correct += correctCount;
-  stats.dailyHistory[today].incorrect += incorrectCount;
+  stats.dailyHistory[today].correct += pointsEarned;
+  stats.dailyHistory[today].incorrect += (result.totalQuestions - result.score);
 
-  // 6. Save to Cloud & Local
-  localStorage.setItem(`${USER_STATS_PREFIX}${username}`, JSON.stringify(stats));
+  // 6. Save Stats (Detail view)
+  // We save this first so the subsequent leaderboard sync can see it
   await saveToCloud(`${USER_STATS_PREFIX}${username}`, stats);
+  localStorage.setItem(`${USER_STATS_PREFIX}${username}`, JSON.stringify(stats));
 
-  // 7. Trigger Leaderboard Update immediately
-  await updateLeaderboard(username, "-", stats.totalCorrect);
+  // 7. Update Leaderboard
+  // This will force a sync of all users to ensure consistency
+  await updateLeaderboard(username, "-", newTotalCorrect);
 
   return stats;
 };
 
 // --- Leaderboard Logic ---
 
-export const getLeaderboard = async (skipCache: boolean = false): Promise<LeaderboardEntry[]> => {
+export const getLeaderboard = async (forceSync: boolean = false): Promise<LeaderboardEntry[]> => {
   let currentList: LeaderboardEntry[] = [];
 
-  // 1. Try Cloud
+  // 1. Fetch current aggregate data to preserve grades/metadata
   const cloudData = await fetchFromCloud<LeaderboardEntry[]>(LEADERBOARD_KEY);
-  if (cloudData) {
+  if (cloudData && Array.isArray(cloudData)) {
     currentList = cloudData;
-    localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(cloudData));
-  } else if (!skipCache) {
-    // Fallback Local
-    try {
-      const local = localStorage.getItem(LEADERBOARD_KEY);
-      if (local) currentList = JSON.parse(local);
-    } catch (e) {
-      console.error("Local leaderboard load failed", e);
-    }
+  } else {
+     // Fallback local
+     try {
+       const local = localStorage.getItem(LEADERBOARD_KEY);
+       if (local) currentList = JSON.parse(local);
+     } catch (e) {}
   }
 
-  // 2. Merge with Predefined Users
-  // This ensures that all students appear in the list even if they haven't played yet
-  const existingMap = new Map(currentList.map(p => [p.name, p]));
-  
+  // 2. Ensure Predefined Users exist in the list
+  const existingMap = new Map(currentList.map(p => [p.name.trim(), p]));
   PREDEFINED_USERS.forEach(name => {
-      if (!existingMap.has(name)) {
+      const trimmedName = name.trim();
+      if (!existingMap.has(trimmedName)) {
           currentList.push({
-              name,
+              name: trimmedName,
               grade: '-',
               totalCorrect: 0,
               badgesCount: 0,
-              lastActive: 'غير نشط' // Not active yet
+              lastActive: 'غير نشط'
           });
       }
   });
 
-  // 3. Sort by Score (Desc) then by Name (Asc) for stability
-  return currentList.sort((a, b) => {
+  // 3. RECONSTRUCTION: If forceSync is true, fetch individual stats for ALL users
+  // This ensures the leaderboard reflects the actual analytics data
+  if (forceSync) {
+      try {
+          const statsPromises = PREDEFINED_USERS.map(async (name) => {
+              const stats = await loadStats(name.trim());
+              return { name: name.trim(), stats };
+          });
+
+          const allStats = await Promise.all(statsPromises);
+          
+          currentList = currentList.map(entry => {
+              const userStatsObj = allStats.find(s => s.name === entry.name);
+              
+              // If we found stats, reconcile the score
+              if (userStatsObj) {
+                  const statsScore = userStatsObj.stats.totalCorrect;
+                  // We take the MAX of stats vs existing leaderboard to prevent data loss
+                  // But we prioritize stats if it's higher or if leaderboard was 0
+                  const finalScore = Math.max(statsScore, entry.totalCorrect);
+                  
+                  return {
+                      ...entry,
+                      totalCorrect: finalScore,
+                      badgesCount: getBadgeStatus(finalScore).filter(b => b.unlocked).length,
+                      lastActive: userStatsObj.stats.lastPlayedDate || entry.lastActive
+                  };
+              }
+              return entry;
+          });
+          
+          // Save the synchronized list
+          saveToCloud(LEADERBOARD_KEY, currentList);
+          
+      } catch (e) {
+          console.error("Failed to sync leaderboard with analytics", e);
+      }
+  }
+
+  // 4. Sort
+  const sorted = currentList.sort((a, b) => {
      if (b.totalCorrect !== a.totalCorrect) {
          return b.totalCorrect - a.totalCorrect;
      }
      return a.name.localeCompare(b.name, 'ar');
   });
+
+  localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(sorted));
+  return sorted;
 };
 
 export const registerNewPlayer = async (name: string, grade: string) => {
-  // Always load stats from cloud to ensure we have the real totalCorrect
-  const stats = await loadStats(name);
-  
-  // Only update leaderboard if we have data or to initialize, 
-  // but updateLeaderboard now handles safety checks.
-  await updateLeaderboard(name, grade, stats.totalCorrect);
+  // Trigger a sync to make sure this player is initialized correctly
+  await updateLeaderboard(name, grade, 0);
 };
 
-export const updateLeaderboard = async (name: string, grade: string, totalCorrect: number) => {
+export const updateLeaderboard = async (name: string, grade: string, newTotalScore: number) => {
   try {
-    // 1. Fetch Fresh Leaderboard from Cloud
+    // We force sync here to ensure the leaderboard is clean before we update our specific user
+    // This is a bit heavy (7 fetches) but guarantees consistency
     let currentList = await getLeaderboard(true);
     
-    const existingIndex = currentList.findIndex(p => p.name === name);
+    const trimmedName = name.trim();
+    const existingIndex = currentList.findIndex(p => p.name === trimmedName);
     const today = getTodayDateString();
 
-    let finalTotalCorrect = totalCorrect;
-    
-    // Safety check: Ensure Monotonicity (Score should never go down)
-    // This protects against overwriting high scores with 0 if local data was lost
     if (existingIndex >= 0) {
-        const existingEntry = currentList[existingIndex];
-        if (totalCorrect < existingEntry.totalCorrect) {
-            console.log(`Preventing score reset for ${name}: New=${totalCorrect}, Kept=${existingEntry.totalCorrect}`);
-            finalTotalCorrect = existingEntry.totalCorrect;
-        }
+        const entry = currentList[existingIndex];
+        // Ensure we don't overwrite a higher score from a parallel session
+        const finalScore = Math.max(newTotalScore, entry.totalCorrect);
+        
+        currentList[existingIndex] = {
+            ...entry,
+            grade: grade !== '-' ? grade : entry.grade,
+            totalCorrect: finalScore,
+            badgesCount: getBadgeStatus(finalScore).filter(b => b.unlocked).length,
+            lastActive: today
+        };
     }
 
-    const badgesCount = getBadgeStatus(finalTotalCorrect).filter(b => b.unlocked).length;
-
-    const newEntry: LeaderboardEntry = {
-      name,
-      grade,
-      totalCorrect: finalTotalCorrect,
-      badgesCount,
-      lastActive: today
-    };
-    
-    if (existingIndex >= 0) {
-      // Update existing entry
-      currentList[existingIndex] = newEntry;
-    } else {
-      // Add new entry
-      currentList.push(newEntry);
-    }
-
-    // 3. Sort - CRITICAL: Must match getLeaderboard sort logic to ensure consistent ranking
+    // Sort again after update
     const sortedList = currentList.sort((a, b) => {
         if (b.totalCorrect !== a.totalCorrect) {
             return b.totalCorrect - a.totalCorrect;
@@ -231,9 +242,8 @@ export const updateLeaderboard = async (name: string, grade: string, totalCorrec
         return a.name.localeCompare(b.name, 'ar');
     });
 
-    // 4. Save back to Cloud
+    // Save
     await saveToCloud(LEADERBOARD_KEY, sortedList);
-    // Also save local
     localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(sortedList));
 
     return sortedList;
