@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Difficulty, Operation, GameConfig } from '../types';
-import { Brain, Calculator, ChevronLeft, Zap, Divide, X as MultiplyIcon, Plus, Minus, Trophy, BarChart3, Timer } from 'lucide-react';
+import { Brain, Calculator, ChevronLeft, Zap, Divide, X as MultiplyIcon, Plus, Minus, Trophy, BarChart3, Timer, Star, Crown } from 'lucide-react';
 import { initAudio } from '../services/soundService';
+import { getBadgeDefinitions } from '../services/statsService';
 
 interface WelcomeScreenProps {
   onStart: (config: GameConfig) => void;
@@ -10,9 +11,18 @@ interface WelcomeScreenProps {
   onShowLeaderboard: () => void;
   highScore: number;
   userName?: string;
+  currentTotalScore?: number;
 }
 
-const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onQuickStart, onShowAnalytics, onShowLeaderboard, highScore, userName }) => {
+const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ 
+    onStart, 
+    onQuickStart, 
+    onShowAnalytics, 
+    onShowLeaderboard, 
+    highScore, 
+    userName,
+    currentTotalScore = 0
+}) => {
   const [difficulty, setDifficulty] = useState<Difficulty | null>(null);
   const [operation, setOperation] = useState<Operation | null>(null);
 
@@ -28,13 +38,17 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onQuickStart, on
       onQuickStart();
   };
 
+  // Determine current rank based on total score
+  const badges = getBadgeDefinitions(currentTotalScore);
+  const currentBadge = badges.reverse().find(b => b.unlocked) || badges[badges.length -1];
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-indigo-50 to-blue-100 text-gray-800 relative">
       
-      {/* High Score Badge */}
+      {/* High Score Badge (Session/Device best) */}
       <div className="absolute top-6 left-6 bg-white/80 backdrop-blur-sm px-4 py-2 rounded-2xl shadow-sm border border-indigo-100 flex items-center gap-2 text-indigo-900 font-bold animate-pop-in">
         <Trophy className="text-yellow-500" size={20} />
-        <span className="text-sm">أعلى نتيجة:</span>
+        <span className="text-sm">أفضل جولة:</span>
         <span className="text-xl">{highScore}/10</span>
       </div>
 
@@ -67,8 +81,21 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onQuickStart, on
           <h1 className="text-4xl font-extrabold text-indigo-900 mb-2">
             {userName ? `أهلاً بك، ${userName}!` : 'العبقري الصغير'}
           </h1>
+          
+          {/* User Progress Summary (Cross-Device Sync Visualization) */}
           {userName ? (
-            <p className="text-gray-500 text-lg">هل أنت مستعدة لتحدي الرياضيات اليوم؟</p>
+            <div className="flex items-center justify-center gap-3 mt-3 animate-fade-in-up">
+                 <div className="bg-orange-50 text-orange-700 px-4 py-1.5 rounded-full text-sm font-bold border border-orange-100 flex items-center gap-2">
+                    <Star size={16} fill="currentColor" />
+                    <span>الرصيد: {currentTotalScore} نقطة</span>
+                 </div>
+                 {currentBadge && (
+                    <div className={`px-4 py-1.5 rounded-full text-sm font-bold border flex items-center gap-2 ${currentBadge.color.replace('bg-', 'bg-opacity-20 ')}`}>
+                        <span>{currentBadge.icon}</span>
+                        <span>{currentBadge.name}</span>
+                    </div>
+                 )}
+            </div>
           ) : (
             <p className="text-gray-500 text-lg">اختبر مهاراتك في الرياضيات وتحدى نفسك!</p>
           )}

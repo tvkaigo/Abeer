@@ -7,7 +7,7 @@ import LeaderboardScreen from './components/LeaderboardScreen';
 import UserEntryModal from './components/UserEntryModal';
 import { AppState, GameConfig, GameResult, Question, Difficulty, Operation } from './types';
 import { generateQuestions } from './services/mathService';
-import { updateUserStats, registerNewPlayer } from './services/statsService';
+import { updateUserStats, registerNewPlayer, loadStats } from './services/statsService';
 
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.WELCOME);
@@ -17,6 +17,8 @@ const App: React.FC = () => {
   const [highScore, setHighScore] = useState<number>(0);
   const [isNewHighScore, setIsNewHighScore] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState(false);
+  
+  // Stores the cumulative score fetched from cloud/local storage
   const [currentTotalScore, setCurrentTotalScore] = useState<number>(0);
   
   // Track custom time limit (e.g., 60s for Quick Test)
@@ -33,14 +35,27 @@ const App: React.FC = () => {
     }
   });
 
-  // Ensure the user is registered in the cloud leaderboard when the app starts
+  // Synchronization Effect: Runs on mount AND when user logs in
+  // This ensures that if I played on Device A, then open Device B, 
+  // Device B fetches my latest stats immediately.
   useEffect(() => {
-    if (userData) {
-      registerNewPlayer(userData.name, userData.grade).catch(err => 
-        console.error("Background leaderboard sync failed:", err)
-      );
-    }
-  }, [userData]); // Run when userData is loaded or changed
+    const syncUserProfile = async () => {
+      if (userData?.name) {
+        try {
+          // loadStats handles the merge logic (Cloud vs Local)
+          const stats = await loadStats(userData.name);
+          setCurrentTotalScore(stats.totalCorrect);
+          
+          // Also ensure they are registered/updated in the background
+          registerNewPlayer(userData.name, userData.grade);
+        } catch (err) {
+          console.error("Background profile sync failed:", err);
+        }
+      }
+    };
+    
+    syncUserProfile();
+  }, [userData]); 
 
   useEffect(() => {
     const savedScore = localStorage.getItem('mathGeniusHighScore');
@@ -50,18 +65,15 @@ const App: React.FC = () => {
   }, []);
 
   const handleUserEntry = async (name: string) => {
-    // Grade is removed from input, using default placeholder
     const grade = "-";
     const data = { name, grade };
+    
+    // 1. Set Local Data Immediately
     setUserData(data);
     localStorage.setItem('mathGeniusUserData', JSON.stringify(data));
     
-    // Register player in leaderboard asynchronously
-    try {
-        await registerNewPlayer(name, grade);
-    } catch (e) {
-        console.error("Failed to register player online", e);
-    }
+    // 2. We don't need to manually call sync here because the useEffect [userData] 
+    // will trigger immediately after setUserData, performing the cloud fetch.
   };
 
   const handleStartGame = (config: GameConfig) => {
@@ -144,6 +156,7 @@ const App: React.FC = () => {
             onShowLeaderboard={handleShowLeaderboard}
             highScore={highScore}
             userName={userData?.name}
+            currentTotalScore={currentTotalScore}
           />
           {!userData && <UserEntryModal onSubmit={handleUserEntry} />}
         </>

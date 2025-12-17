@@ -1,6 +1,5 @@
-
 import React, { useState } from 'react';
-import { User, ArrowLeft, ChevronDown } from 'lucide-react';
+import { User, ArrowLeft, ChevronDown, Loader2 } from 'lucide-react';
 import { PREDEFINED_USERS } from '../types';
 
 interface UserEntryModalProps {
@@ -10,14 +9,19 @@ interface UserEntryModalProps {
 const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSubmit }) => {
   const [name, setName] = useState('');
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
       setError('يرجى اختيار الاسم');
       return;
     }
-    onSubmit(name);
+    
+    setIsLoading(true);
+    // Simulate a brief delay or wait for async operation if passed
+    await onSubmit(name);
+    // Note: We don't set isLoading(false) because the modal usually unmounts immediately after submit
   };
 
   return (
@@ -31,7 +35,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSubmit }) => {
             <User size={32} />
           </div>
           <h2 className="text-2xl font-bold text-gray-800">مرحباً بك في العبقري الصغير!</h2>
-          <p className="text-gray-500 mt-2">للبدء، يرجى اختيار اسمك</p>
+          <p className="text-gray-500 mt-2">للبدء، يرجى اختيار اسمك لاستعادة نقاطك</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -41,7 +45,8 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSubmit }) => {
               <select 
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 outline-none transition-all pr-10 appearance-none bg-white text-gray-700 font-medium"
+                disabled={isLoading}
+                className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 outline-none transition-all pr-10 appearance-none bg-white text-gray-700 font-medium disabled:opacity-70"
               >
                 <option value="" disabled>اختر اسمك من القائمة...</option>
                 {PREDEFINED_USERS.map((user) => (
@@ -65,9 +70,18 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSubmit }) => {
 
           <button 
             type="submit"
-            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 mt-4"
+            disabled={isLoading}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 mt-4 disabled:opacity-70 disabled:cursor-wait"
           >
-            دخول <ArrowLeft className="rtl:rotate-180" size={20} />
+            {isLoading ? (
+                <>
+                    <Loader2 className="animate-spin" size={20} /> جاري جلب البيانات...
+                </>
+            ) : (
+                <>
+                    دخول <ArrowLeft className="rtl:rotate-180" size={20} />
+                </>
+            )}
           </button>
         </form>
       </div>
