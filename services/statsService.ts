@@ -21,6 +21,11 @@ const getStorageKey = (usernameOrId: string | number): string => {
   return `${USER_STATS_PREFIX}${usernameOrId}`;
 };
 
+// --- Helper: Legacy Key Generation (username based) ---
+const getLegacyStorageKey = (username: string): string => {
+    return `${USER_STATS_PREFIX}${username}`;
+};
+
 // --- Helper: Badge Logic ---
 export const getBadgeDefinitions = (totalCorrect: number): Badge[] => {
   return [
@@ -86,10 +91,38 @@ export const loadStats = async (username: string): Promise<UserStats> => {
   // 1. Fetch from Cloud (Using ID-based key)
   let cloudStats: UserStats | null = await fetchFromCloud<UserStats>(key);
 
+  // 1.5 Cloud Migration: If not found by ID, try Legacy Key (Name)
+  if (!cloudStats) {
+      const legacyKey = getLegacyStorageKey(username);
+      if (legacyKey !== key) {
+          const legacyStats = await fetchFromCloud<UserStats>(legacyKey);
+          if (legacyStats) {
+              console.log("Migrating legacy cloud stats to new format...");
+              cloudStats = legacyStats;
+              // Ensure ID is set correctly on the migrated object
+              const userMeta = PREDEFINED_USERS.find(u => u.name === username);
+              if (userMeta) cloudStats.id = userMeta.id;
+              
+              // Save to new key immediately so next fetch works
+              await saveToCloud(key, cloudStats);
+          }
+      }
+  }
+
   // 2. Fetch from LocalStorage (Using ID-based key)
   let localStats: UserStats | null = null;
   try {
-      const localStr = localStorage.getItem(key);
+      let localStr = localStorage.getItem(key);
+      
+      // 2.5 Local Migration: If not found by ID, try Legacy Key
+      if (!localStr) {
+          const legacyKey = getLegacyStorageKey(username);
+          if (legacyKey !== key) {
+              localStr = localStorage.getItem(legacyKey);
+              if (localStr) console.log("Found legacy local stats, attempting migration...");
+          }
+      }
+      
       if (localStr) localStats = JSON.parse(localStr);
   } catch (e) { console.warn("Local load error"); }
 
@@ -126,7 +159,7 @@ export const loadStats = async (username: string): Promise<UserStats> => {
 export const updateUserStats = async (result: GameResult, username: string): Promise<UserStats> => {
   if (!username) return getInitialStats();
 
-  // 1. Load current best stats
+  // 1. Load current best stats (handles sync/migration internally)
   let stats = await loadStats(username);
   
   const today = getTodayDateString();
@@ -191,6 +224,16 @@ export const getLeaderboard = async (forceSync: boolean = false): Promise<Leader
           stats = await fetchFromCloud<UserStats>(key);
       } catch (e) {}
 
+      // 1.5 Fallback: Try Legacy Cloud Key if not found
+      if (!stats) {
+          const legacyKey = `${USER_STATS_PREFIX}${user.name}`;
+          if (legacyKey !== key) {
+              try {
+                  stats = await fetchFromCloud<UserStats>(legacyKey);
+              } catch(e) {}
+          }
+      }
+
       // 2. If Cloud failed or is empty, try Local (Only useful for current user on own device)
       if (!stats) {
          try {
@@ -236,8 +279,17 @@ export const registerNewPlayer = async (name: string, grade: string) => {
     try {
         // Check if user exists in cloud
         const exists = await fetchFromCloud(key);
-        // If not, force create a cloud entry so they appear publicly immediately
+        // If not found, ALSO check legacy key to avoid overwriting existing legacy user with 0 stats
         if (exists === null) {
+             const legacyKey = getLegacyStorageKey(name);
+             const legacyExists = await fetchFromCloud(legacyKey);
+             
+             if (legacyExists) {
+                 // Do nothing here, loadStats will handle the migration on first real load
+                 return;
+             }
+
+            // Only if NEITHER exist, initialize new player
             await saveToCloud(key, getInitialStats(name));
         }
     } catch (e) {
