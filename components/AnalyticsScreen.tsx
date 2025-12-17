@@ -9,25 +9,24 @@ interface AnalyticsScreenProps {
 }
 
 const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) => {
-  // المتغير الأساسي لتخزين بيانات اللاعب القادمة من السحابة
   const [player, setPlayer] = useState<UserStats | null>(null);
   const [rank, setRank] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // دالة لجلب البيانات
   const fetchData = async () => {
     if (userName) {
       setIsLoading(true);
       try {
-        // Fetch both User Stats and Leaderboard to calculate Rank
+        // Parallel fetch for speed
+        // loadStats now handles the sync between Cloud and Local internally
         const [userData, leaderboardData] = await Promise.all([
             loadStats(userName),
-            getLeaderboard(false) // Use cached if available for speed, or force sync
+            getLeaderboard(false)
         ]);
         
         setPlayer(userData);
 
-        // Calculate Rank
+        // Find Rank
         const userRank = leaderboardData.findIndex(u => u.name === userName) + 1;
         setRank(userRank > 0 ? userRank : null);
 
@@ -57,18 +56,17 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
   if (isLoading || !player) return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 gap-4">
       <Loader2 size={48} className="text-indigo-600 animate-spin" />
-      <p className="text-gray-500 font-bold animate-pulse">جاري جلب بيانات البطل...</p>
+      <p className="text-gray-500 font-bold animate-pulse">جاري مزامنة بيانات البطل...</p>
     </div>
   );
 
-  // حساب الإحصائيات المشتقة
   const totalAttempts = player.totalCorrect + player.totalIncorrect;
   const accuracy = totalAttempts > 0 
     ? Math.round((player.totalCorrect / totalAttempts) * 100) 
     : 0;
 
   const weeklyData = getLast7DaysStats(player);
-  const maxWeeklyValue = Math.max(...weeklyData.map(d => d.correct + d.incorrect), 5); // Minimum 5 for scale
+  const maxWeeklyValue = Math.max(...weeklyData.map(d => d.correct + d.incorrect), 5);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center p-4 overflow-y-auto font-sans">
@@ -96,7 +94,7 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
           <button 
             onClick={fetchData}
             className="bg-white p-3 rounded-2xl shadow-sm text-slate-500 hover:text-indigo-600 hover:shadow-md transition-all active:scale-95"
-            title="تحديث البيانات"
+            title="تحديث البيانات من السحابة"
           >
             <RefreshCw size={24} />
           </button>
@@ -105,7 +103,7 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
         {/* Top Stats Grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
             
-          {/* Card 1: Rank (New) */}
+          {/* Card 1: Rank */}
           <div className="bg-gradient-to-br from-yellow-50 to-white p-4 rounded-3xl shadow-sm border border-yellow-200 flex flex-col items-center justify-center hover:scale-[1.02] transition-transform relative overflow-hidden">
              <div className="absolute top-0 right-0 p-2 opacity-10">
                 <Trophy size={60} className="text-yellow-500" />
@@ -163,7 +161,7 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
           <div className="flex items-end justify-between h-48 gap-3 px-2">
             {weeklyData.map((day, idx) => {
               const total = day.correct + day.incorrect;
-              const barHeight = total === 0 ? 5 : (total / maxWeeklyValue) * 100; // Min 5% height
+              const barHeight = total === 0 ? 5 : (total / maxWeeklyValue) * 100;
               const correctHeight = total === 0 ? 0 : (day.correct / total) * 100;
               const incorrectHeight = total === 0 ? 0 : (day.incorrect / total) * 100;
 
@@ -205,7 +203,7 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {player.badges.map((badge) => {
-               // Calculate Progress Percentage for this specific badge
+               // Calculate Progress Percentage
                const progress = Math.min(100, (player.totalCorrect / badge.required) * 100);
                
                return (
@@ -229,7 +227,6 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
                       }
                     </div>
                     
-                    {/* Progress Bar for Locked Badges */}
                     {!badge.unlocked && (
                       <div className="mt-3 w-full h-2 bg-slate-200 rounded-full overflow-hidden">
                         <div 
