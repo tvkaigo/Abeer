@@ -39,7 +39,7 @@ export const getInitialStats = (username: string = ''): UserStats => {
 const fetchFromCloud = async <T>(key: string): Promise<T | null> => {
   try {
     const encodedKey = encodeURIComponent(key);
-    // Add timestamp to prevent browser/network caching
+    // Add timestamp to prevent browser/network caching is CRITICAL for real-time updates
     const response = await fetch(`${CLOUD_API_URL}/${encodedKey}?t=${Date.now()}`);
     if (response.status === 404) return null;
     if (!response.ok) throw new Error(`Network response was not ok: ${response.status}`);
@@ -87,7 +87,9 @@ export const loadStats = async (username: string): Promise<UserStats> => {
       if (localStr) localStats = JSON.parse(localStr);
   } catch (e) { console.warn("Local load error"); }
 
-  // 3. SYNCHRONIZATION LOGIC
+  // 3. SYNCHRONIZATION LOGIC (Merge Strategy: Highest Score Wins)
+  
+  // If cloud failed completely, fallback to local to allow offline play
   if (cloudFetchFailed) {
       if (localStats) return localStats;
       return initial;
@@ -97,27 +99,23 @@ export const loadStats = async (username: string): Promise<UserStats> => {
   const cloudScore = cloudStats?.totalCorrect || 0;
   const localScore = localStats?.totalCorrect || 0;
   
-  const cloudIncorrect = cloudStats?.totalIncorrect || 0;
-  const localIncorrect = localStats?.totalIncorrect || 0;
-
-  // Compare Logic: Correct Answers > Incorrect Answers > Prefer Cloud
+  // Compare Scores:
   if (cloudScore > localScore) {
+      // Cloud has newer data (played on another device). Update Local.
       bestStats = { ...initial, ...cloudStats };
       localStorage.setItem(key, JSON.stringify(bestStats));
   } else if (localScore > cloudScore) {
+      // Local has newer data (played offline or just now). Update Cloud.
       bestStats = { ...initial, ...localStats };
       saveToCloud(key, bestStats); 
   } else {
-      // Scores Equal. Tie break with Incorrect answers
-      if (cloudIncorrect >= localIncorrect) {
-          bestStats = cloudStats ? { ...initial, ...cloudStats } : { ...initial, ...localStats || {} };
-          if (cloudStats) localStorage.setItem(key, JSON.stringify(bestStats));
-      } else {
-          bestStats = { ...initial, ...localStats };
-          saveToCloud(key, bestStats);
-      }
+      // Scores Equal. Prefer Cloud object if exists to get latest metadata, else Local.
+      bestStats = cloudStats ? { ...initial, ...cloudStats } : { ...initial, ...localStats || {} };
+      // Ensure consistency
+      if (cloudStats && !localStats) localStorage.setItem(key, JSON.stringify(bestStats));
   }
 
+  // 4. Recalculate Badges & Ensure Consistency
   bestStats.badges = getBadgeDefinitions(bestStats.totalCorrect);
   if (!bestStats.dailyHistory) bestStats.dailyHistory = {};
 
@@ -127,11 +125,13 @@ export const loadStats = async (username: string): Promise<UserStats> => {
 export const updateUserStats = async (result: GameResult, username: string): Promise<UserStats> => {
   if (!username) return getInitialStats();
 
+  // 1. Load current best stats (Sync first)
   let stats = await loadStats(username);
   
   const today = getTodayDateString();
   const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
 
+  // 2. Apply Game Results
   const pointsEarned = result.score;
   const incorrectCount = result.totalQuestions - result.score;
   
@@ -142,6 +142,7 @@ export const updateUserStats = async (result: GameResult, username: string): Pro
   const userMeta = PREDEFINED_USERS.find(u => u.name === username);
   if (userMeta) stats.id = userMeta.id;
 
+  // Streak Logic
   if (stats.lastPlayedDate !== today) {
     if (stats.lastPlayedDate === yesterday) {
         stats.streak = (stats.streak || 0) + 1;
@@ -151,6 +152,7 @@ export const updateUserStats = async (result: GameResult, username: string): Pro
   }
   stats.lastPlayedDate = today;
 
+  // History Logic
   if (!stats.dailyHistory) stats.dailyHistory = {};
   if (!stats.dailyHistory[today]) {
     stats.dailyHistory[today] = { date: today, correct: 0, incorrect: 0 };
@@ -160,10 +162,17 @@ export const updateUserStats = async (result: GameResult, username: string): Pro
 
   stats.badges = getBadgeDefinitions(stats.totalCorrect);
 
+  // 3. Save to Storage (Immediate Update)
   const key = `${USER_STATS_PREFIX}${username}`;
+  
+  // Save Local
   localStorage.setItem(key, JSON.stringify(stats)); 
+  
+  // Save Cloud (Critical for real-time leaderboard)
   await saveToCloud(key, stats); 
 
+  // 4. Trigger Leaderboard Update logic (optional, but good practice)
+  // We don't await this to keep UI responsive
   updateLeaderboard(username, "-", stats.totalCorrect);
 
   return stats;
@@ -172,32 +181,29 @@ export const updateUserStats = async (result: GameResult, username: string): Pro
 // --- Leaderboard Logic ---
 
 export const getLeaderboard = async (forceSync: boolean = false): Promise<LeaderboardEntry[]> => {
+  // We map over ALL predefined users to check their stats
   const fetchPromises = PREDEFINED_USERS.map(async (user) => {
       const key = `${USER_STATS_PREFIX}${user.name}`;
       let stats: UserStats | null = null;
 
-      // 1. Always try Cloud first for Leaderboard to ensure global consistency
+      // 1. Try Cloud (Primary Source for Leaderboard)
       try {
-          const cloudData = await fetchFromCloud<UserStats>(key);
-          if (cloudData) {
-              stats = cloudData;
-              // Update local cache so next time it's faster if offline
-              localStorage.setItem(key, JSON.stringify(cloudData));
+          stats = await fetchFromCloud<UserStats>(key);
+          // If we got cloud data, update our local cache of THIS user so we have it for next time
+          if (stats) {
+             localStorage.setItem(key, JSON.stringify(stats));
           }
-      } catch (e) {
-          // Silent fail on cloud, will fallback to local
-      }
+      } catch (e) {}
 
-      // 2. Fallback to Local if Cloud failed or returned nothing
+      // 2. If Cloud failed or is empty, try Local
       if (!stats) {
-          try {
-              const localStr = localStorage.getItem(key);
-              if (localStr) {
-                  stats = JSON.parse(localStr);
-              }
-          } catch (e) {}
+         try {
+            const localStr = localStorage.getItem(key);
+            if (localStr) stats = JSON.parse(localStr);
+         } catch (e) {}
       }
 
+      // 3. If still nothing, init empty
       if (!stats) {
           stats = getInitialStats(user.name);
       }
@@ -208,25 +214,17 @@ export const getLeaderboard = async (forceSync: boolean = false): Promise<Leader
           name: user.name,
           grade: '-', 
           totalCorrect: stats.totalCorrect || 0,
-          totalIncorrect: stats.totalIncorrect || 0, // Added for sorting
           badgesCount: badgesCount,
           lastActive: stats.lastPlayedDate || 'جديد'
-      } as LeaderboardEntry & { totalIncorrect: number };
+      } as LeaderboardEntry;
   });
 
   const results = await Promise.all(fetchPromises);
 
-  // Sorting Logic:
-  // 1. Higher Total Correct wins.
-  // 2. If Equal, Lower Total Incorrect wins (Better accuracy).
-  // 3. If Equal, Alphabetical.
+  // Sort by Total Correct Descending
   const sorted = results.sort((a, b) => {
      if (b.totalCorrect !== a.totalCorrect) {
          return b.totalCorrect - a.totalCorrect;
-     }
-     // Tie-breaker: Accuracy (Less incorrect answers is better)
-     if (a.totalIncorrect !== b.totalIncorrect) {
-         return a.totalIncorrect - b.totalIncorrect;
      }
      return a.name.localeCompare(b.name, 'ar');
   });
@@ -238,11 +236,12 @@ export const registerNewPlayer = async (name: string, grade: string) => {
     const key = `${USER_STATS_PREFIX}${name}`;
     try {
         const exists = await fetchFromCloud(key);
+        // Only initialize if explicitly Not Found (404). 
         if (exists === null) {
             await saveToCloud(key, getInitialStats(name));
         }
     } catch (e) {
-        console.warn("Registration skipped due to network error to protect data.");
+        console.warn("Registration check skipped due to network error.");
     }
 };
 

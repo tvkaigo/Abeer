@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Home, Trophy, Medal, Crown, Sparkles, Loader2, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { getLeaderboard, getBadgeStatus } from '../services/statsService';
 import { LeaderboardEntry } from '../types';
@@ -12,48 +12,32 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
   const [leaders, setLeaders] = useState<LeaderboardEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  
-  // Cache state
-  const lastFetchTimeRef = useRef<number>(0);
-  const CACHE_DURATION = 30000; // 30 seconds
 
-  const fetchLeaders = useCallback(async (force = false) => {
-    const now = Date.now();
-    const hasData = leaders.length > 0;
-    const isCacheValid = (now - lastFetchTimeRef.current < CACHE_DURATION);
-
-    // If not forced, we have data, and cache is still valid, skip fetch
-    if (!force && hasData && isCacheValid) {
-        return;
-    }
-
-    // UI Feedback
-    if (force) {
-        setIsRefreshing(true);
-    } else if (!hasData) {
-        setIsLoading(true);
-    }
-
+  // Function to fetch data, wrapped in useCallback to be used in useEffect
+  const fetchLeaders = useCallback(async (showLoader = true) => {
+    if (showLoader) setIsRefreshing(true);
+    
     try {
-        // Force fetch from cloud to get latest data
-        const data = await getLeaderboard(force);
+        // forceSync true isn't strictly necessary with the new logic, 
+        // but calling getLeaderboard grabs fresh cloud data.
+        const data = await getLeaderboard(true);
         setLeaders(data);
-        lastFetchTimeRef.current = Date.now();
     } catch (error) {
         console.error("Failed to fetch leaderboard:", error);
     } finally {
         setIsLoading(false);
-        setIsRefreshing(false);
+        if (showLoader) setIsRefreshing(false);
     }
-  }, [leaders.length]);
+  }, []);
 
   useEffect(() => {
-    fetchLeaders(false); // Initial load
+    fetchLeaders(false); // Initial load without full refresh spinner if possible
     
-    // Poll for updates every 10 seconds, but fetchLeaders will only execute if 30s elapsed
+    // Poll for updates every 15 seconds to keep data fresh across devices
     const interval = setInterval(() => {
-         fetchLeaders(false);
-    }, 10000);
+         fetchLeaders(false); // Background refresh
+    }, 15000);
+
     return () => clearInterval(interval);
   }, [fetchLeaders]);
 
@@ -116,7 +100,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                 </div>
             </div>
             <h1 className="text-3xl font-black text-slate-800 tracking-tight">قائمة الأبطال</h1>
-            <p className="text-slate-500 text-sm font-medium">الترتيب حسب مجموع الإجابات الصحيحة</p>
+            <p className="text-slate-500 text-sm font-medium">نتائج مباشرة لجميع اللاعبين</p>
           </div>
           
           <button 
