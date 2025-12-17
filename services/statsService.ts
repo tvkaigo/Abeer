@@ -9,6 +9,23 @@ const getTodayDateString = (): string => {
   return new Date().toISOString().split('T')[0];
 };
 
+// --- Helper: Key Generation based on ID ---
+const getStorageKey = (usernameOrId: string | number): string => {
+  // If input is a number (ID), use it directly
+  if (typeof usernameOrId === 'number') {
+    return `${USER_STATS_PREFIX}${usernameOrId}`;
+  }
+  
+  // If input is a string (Name), look up the ID
+  const user = PREDEFINED_USERS.find(u => u.name === usernameOrId);
+  if (user) {
+    return `${USER_STATS_PREFIX}${user.id}`;
+  }
+  
+  // Fallback for unknown users (shouldn't happen with predefined list)
+  return `${USER_STATS_PREFIX}${usernameOrId}`;
+};
+
 // --- Helper: Badge Logic ---
 export const getBadgeDefinitions = (totalCorrect: number): Badge[] => {
   return [
@@ -67,13 +84,14 @@ const saveToCloud = async (key: string, data: any): Promise<void> => {
 export const loadStats = async (username: string): Promise<UserStats> => {
   if (!username) return getInitialStats();
   
-  const key = `${USER_STATS_PREFIX}${username}`;
+  // Resolve key using ID lookup
+  const key = getStorageKey(username);
   const initial = getInitialStats(username);
   
-  // 1. Fetch from Cloud
+  // 1. Fetch from Cloud (Using ID-based key)
   let cloudStats: UserStats | null = await fetchFromCloud<UserStats>(key);
 
-  // 2. Fetch from LocalStorage
+  // 2. Fetch from LocalStorage (Using ID-based key)
   let localStats: UserStats | null = null;
   try {
       const localStr = localStorage.getItem(key);
@@ -90,11 +108,11 @@ export const loadStats = async (username: string): Promise<UserStats> => {
   
   // Compare Scores:
   if (cloudScore > localScore) {
-      // Cloud has newer data (played on another device). Update Local.
+      // Cloud has newer data. Update Local.
       bestStats = { ...initial, ...cloudStats };
       localStorage.setItem(key, JSON.stringify(bestStats));
   } else if (localScore > cloudScore) {
-      // Local has newer data (played offline or just now). Update Cloud.
+      // Local has newer data. Update Cloud.
       bestStats = { ...initial, ...localStats };
       saveToCloud(key, bestStats); 
   } else {
@@ -112,7 +130,7 @@ export const loadStats = async (username: string): Promise<UserStats> => {
 export const updateUserStats = async (result: GameResult, username: string): Promise<UserStats> => {
   if (!username) return getInitialStats();
 
-  // 1. Load current best stats (Sync first)
+  // 1. Load current best stats
   let stats = await loadStats(username);
   
   const today = getTodayDateString();
@@ -150,7 +168,7 @@ export const updateUserStats = async (result: GameResult, username: string): Pro
   stats.badges = getBadgeDefinitions(stats.totalCorrect);
 
   // 3. Save to Storage (Immediate Update)
-  const key = `${USER_STATS_PREFIX}${username}`;
+  const key = getStorageKey(username);
   
   // Save Local
   localStorage.setItem(key, JSON.stringify(stats)); 
@@ -165,17 +183,18 @@ export const updateUserStats = async (result: GameResult, username: string): Pro
 
 export const getLeaderboard = async (forceSync: boolean = false): Promise<LeaderboardEntry[]> => {
   // Loop through ALL predefined users to build the global leaderboard
+  // NOW USING ID TO FETCH DATA
   const fetchPromises = PREDEFINED_USERS.map(async (user) => {
-      const key = `${USER_STATS_PREFIX}${user.name}`;
+      // Use ID to construct the key: stats_1, stats_2, etc.
+      const key = `${USER_STATS_PREFIX}${user.id}`;
       let stats: UserStats | null = null;
 
       // 1. Try Cloud (Primary Source for Leaderboard)
-      // We explicitly fetch each user's data from the cloud DB
       try {
           stats = await fetchFromCloud<UserStats>(key);
       } catch (e) {}
 
-      // 2. If Cloud failed or is empty, try Local (Fall back to see at least self or cached others)
+      // 2. If Cloud failed or is empty, try Local
       if (!stats) {
          try {
             const localStr = localStorage.getItem(key);
@@ -191,21 +210,18 @@ export const getLeaderboard = async (forceSync: boolean = false): Promise<Leader
       const badgesCount = getBadgeDefinitions(stats.totalCorrect || 0).filter(b => b.unlocked).length;
 
       // Construct the entry
-      // We map 'totalCorrect' directly as this is the metric for the leaderboard
       return {
           name: user.name,
           grade: '-', 
           totalCorrect: stats.totalCorrect || 0,
           badgesCount: badgesCount,
           lastActive: stats.lastPlayedDate || 'جديد'
-      } as LeaderboardEntry & { totalIncorrect: number }; // Extended type for internal sorting
+      } as LeaderboardEntry & { totalIncorrect: number };
   });
 
   const results = await Promise.all(fetchPromises);
 
-  // Sort Logic:
-  // 1. Highest Total Correct Answers wins.
-  // 2. Tie-breaker: Alphabetical order.
+  // Sort Logic: Highest Total Correct Answers wins
   const sorted = results.sort((a, b) => {
      if (b.totalCorrect !== a.totalCorrect) {
          return b.totalCorrect - a.totalCorrect;
@@ -217,10 +233,10 @@ export const getLeaderboard = async (forceSync: boolean = false): Promise<Leader
 };
 
 export const registerNewPlayer = async (name: string, grade: string) => {
-    const key = `${USER_STATS_PREFIX}${name}`;
+    // Register using ID key
+    const key = getStorageKey(name);
     try {
         const exists = await fetchFromCloud(key);
-        // Only initialize if explicitly Not Found (404/null). 
         if (exists === null) {
             await saveToCloud(key, getInitialStats(name));
         }
@@ -230,7 +246,6 @@ export const registerNewPlayer = async (name: string, grade: string) => {
 };
 
 export const updateLeaderboard = async (name: string, grade: string, newTotalScore: number) => {
-  // This function is kept for interface compatibility but getLeaderboard does the heavy lifting
   return getLeaderboard(true);
 };
 

@@ -78,11 +78,11 @@ export interface LeaderboardEntry {
 
 // Predefined Users with IDs as requested
 export const PREDEFINED_USERS = [
-  { id: 1, name: 'عبير محمد' },
-  { id: 2, name: 'عبير حنش' },
-  { id: 3, name: 'ندى' },
-  { id: 4, name: 'اسماء' },
-  { id: 5, name: 'ريم' },
-  { id: 6, name: 'منال' },
-  { id: 7, name: 'عائشه' }
+  { id: 1, name: 'Abeer_Mohammed' },
+  { id: 2, name: 'Abeer_Hanash' },
+  { id: 3, name: 'Nada' },
+  { id: 4, name: 'Asmaa' },
+  { id: 5, name: 'Reem' },
+  { id: 6, name: 'Manal' },
+  { id: 7, name: 'Aisha' }
 ];
