@@ -88,8 +88,6 @@ export const loadStats = async (username: string): Promise<UserStats> => {
   } catch (e) { console.warn("Local load error"); }
 
   // 3. SYNCHRONIZATION LOGIC
-  // If cloud fetch failed completely (network error), we return local to allow offline play,
-  // BUT we do NOT trigger a sync back to cloud to avoid overwriting good cloud data with stale local data.
   if (cloudFetchFailed) {
       if (localStats) return localStats;
       return initial;
@@ -104,15 +102,13 @@ export const loadStats = async (username: string): Promise<UserStats> => {
 
   // Compare Logic: Correct Answers > Incorrect Answers > Prefer Cloud
   if (cloudScore > localScore) {
-      // Cloud is ahead. Update Local.
       bestStats = { ...initial, ...cloudStats };
       localStorage.setItem(key, JSON.stringify(bestStats));
   } else if (localScore > cloudScore) {
-      // Local is ahead. Update Cloud.
       bestStats = { ...initial, ...localStats };
       saveToCloud(key, bestStats); 
   } else {
-      // Scores Equal. Tie break with Incorrect answers (more play time = better source of truth)
+      // Scores Equal. Tie break with Incorrect answers
       if (cloudIncorrect >= localIncorrect) {
           bestStats = cloudStats ? { ...initial, ...cloudStats } : { ...initial, ...localStats || {} };
           if (cloudStats) localStorage.setItem(key, JSON.stringify(bestStats));
@@ -122,7 +118,6 @@ export const loadStats = async (username: string): Promise<UserStats> => {
       }
   }
 
-  // 4. Recalculate Badges & Ensure Consistency
   bestStats.badges = getBadgeDefinitions(bestStats.totalCorrect);
   if (!bestStats.dailyHistory) bestStats.dailyHistory = {};
 
@@ -132,13 +127,11 @@ export const loadStats = async (username: string): Promise<UserStats> => {
 export const updateUserStats = async (result: GameResult, username: string): Promise<UserStats> => {
   if (!username) return getInitialStats();
 
-  // 1. Load current best stats (Sync first)
   let stats = await loadStats(username);
   
   const today = getTodayDateString();
   const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
 
-  // 2. Apply Game Results
   const pointsEarned = result.score;
   const incorrectCount = result.totalQuestions - result.score;
   
@@ -149,7 +142,6 @@ export const updateUserStats = async (result: GameResult, username: string): Pro
   const userMeta = PREDEFINED_USERS.find(u => u.name === username);
   if (userMeta) stats.id = userMeta.id;
 
-  // Streak
   if (stats.lastPlayedDate !== today) {
     if (stats.lastPlayedDate === yesterday) {
         stats.streak = (stats.streak || 0) + 1;
@@ -159,7 +151,6 @@ export const updateUserStats = async (result: GameResult, username: string): Pro
   }
   stats.lastPlayedDate = today;
 
-  // History
   if (!stats.dailyHistory) stats.dailyHistory = {};
   if (!stats.dailyHistory[today]) {
     stats.dailyHistory[today] = { date: today, correct: 0, incorrect: 0 };
@@ -169,15 +160,10 @@ export const updateUserStats = async (result: GameResult, username: string): Pro
 
   stats.badges = getBadgeDefinitions(stats.totalCorrect);
 
-  // 3. Save to Storage
   const key = `${USER_STATS_PREFIX}${username}`;
   localStorage.setItem(key, JSON.stringify(stats)); 
-  
-  // We save to cloud regardless here to ensure progress is captured. 
-  // loadStats handled the safety check for base data.
   await saveToCloud(key, stats); 
 
-  // 4. Trigger Leaderboard Update (Cache Refresh)
   updateLeaderboard(username, "-", stats.totalCorrect);
 
   return stats;
@@ -190,35 +176,27 @@ export const getLeaderboard = async (forceSync: boolean = false): Promise<Leader
       const key = `${USER_STATS_PREFIX}${user.name}`;
       let stats: UserStats | null = null;
 
-      // 1. Try Cloud (Primary Source of Truth for other users)
+      // 1. Always try Cloud first for Leaderboard to ensure global consistency
       try {
-          stats = await fetchFromCloud<UserStats>(key);
-          // NEW: Cache successful cloud fetch to local storage. 
-          // This ensures that this device remembers the latest scores of OTHER users too,
-          // providing better offline support and faster subsequent checks.
-          if (stats) {
-              localStorage.setItem(key, JSON.stringify(stats));
+          const cloudData = await fetchFromCloud<UserStats>(key);
+          if (cloudData) {
+              stats = cloudData;
+              // Update local cache so next time it's faster if offline
+              localStorage.setItem(key, JSON.stringify(cloudData));
           }
-      } catch (e) {}
+      } catch (e) {
+          // Silent fail on cloud, will fallback to local
+      }
 
-      // 2. Try Local (Fallback or Primary if I am the user)
-      try {
-          const localStr = localStorage.getItem(key);
-          if (localStr) {
-              const localStats = JSON.parse(localStr);
-              // Check Score AND Incorrect for Tie-Break
-              const cloudScore = stats?.totalCorrect || 0;
-              const localScore = localStats.totalCorrect || 0;
-              
-              if (!stats || localScore > cloudScore) {
-                  stats = localStats;
-              } else if (localScore === cloudScore) {
-                 if ((localStats.totalIncorrect || 0) > (stats.totalIncorrect || 0)) {
-                    stats = localStats;
-                 }
+      // 2. Fallback to Local if Cloud failed or returned nothing
+      if (!stats) {
+          try {
+              const localStr = localStorage.getItem(key);
+              if (localStr) {
+                  stats = JSON.parse(localStr);
               }
-          }
-      } catch (e) {}
+          } catch (e) {}
+      }
 
       if (!stats) {
           stats = getInitialStats(user.name);
@@ -230,22 +208,28 @@ export const getLeaderboard = async (forceSync: boolean = false): Promise<Leader
           name: user.name,
           grade: '-', 
           totalCorrect: stats.totalCorrect || 0,
+          totalIncorrect: stats.totalIncorrect || 0, // Added for sorting
           badgesCount: badgesCount,
           lastActive: stats.lastPlayedDate || 'جديد'
-      } as LeaderboardEntry;
+      } as LeaderboardEntry & { totalIncorrect: number };
   });
 
   const results = await Promise.all(fetchPromises);
 
+  // Sorting Logic:
+  // 1. Higher Total Correct wins.
+  // 2. If Equal, Lower Total Incorrect wins (Better accuracy).
+  // 3. If Equal, Alphabetical.
   const sorted = results.sort((a, b) => {
      if (b.totalCorrect !== a.totalCorrect) {
          return b.totalCorrect - a.totalCorrect;
      }
+     // Tie-breaker: Accuracy (Less incorrect answers is better)
+     if (a.totalIncorrect !== b.totalIncorrect) {
+         return a.totalIncorrect - b.totalIncorrect;
+     }
      return a.name.localeCompare(b.name, 'ar');
   });
-
-  // Background cache update
-  saveToCloud(LEADERBOARD_KEY, sorted);
 
   return sorted;
 };
@@ -254,8 +238,6 @@ export const registerNewPlayer = async (name: string, grade: string) => {
     const key = `${USER_STATS_PREFIX}${name}`;
     try {
         const exists = await fetchFromCloud(key);
-        // Only initialize if explicitly Not Found (404). 
-        // If fetch throws (Network Error), we skip to prevent overwriting valid data.
         if (exists === null) {
             await saveToCloud(key, getInitialStats(name));
         }
