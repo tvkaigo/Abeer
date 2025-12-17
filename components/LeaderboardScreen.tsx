@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Home, Trophy, Medal, Crown, Sparkles, Loader2, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { Home, Trophy, Medal, Crown, Sparkles, Loader2, RefreshCw, CheckCircle2, Globe2, Users } from 'lucide-react';
 import { getLeaderboard, getBadgeStatus } from '../services/statsService';
 import { LeaderboardEntry } from '../types';
 
@@ -108,14 +108,17 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
           </button>
           
           <div className="flex flex-col items-center">
-            <div className="bg-yellow-100 p-3 rounded-full mb-2 text-yellow-600 shadow-sm relative">
-                <Trophy size={32} />
+            <div className="bg-indigo-100 p-3 rounded-full mb-2 text-indigo-600 shadow-sm relative">
+                <Globe2 size={32} />
                 <div className="absolute -top-1 -right-1">
-                  <Sparkles size={16} className="text-yellow-500 animate-spin-slow" />
+                  <Sparkles size={16} className="text-indigo-400 animate-spin-slow" />
                 </div>
             </div>
-            <h1 className="text-3xl font-black text-slate-800 tracking-tight">قائمة الأبطال</h1>
-            <p className="text-slate-500 text-sm font-medium">مجموع الإجابات الصحيحة (الكل)</p>
+            <h1 className="text-3xl font-black text-slate-800 tracking-tight">قائمة الأبطال العامة</h1>
+            <p className="text-slate-500 text-sm font-medium flex items-center gap-1">
+               <Users size={14} />
+               تظهر النقاط لجميع اللاعبين مباشرة
+            </p>
           </div>
           
           <button 
@@ -133,7 +136,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
             {isLoading && leaders.length === 0 ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/90 z-20 backdrop-blur-sm">
                     <Loader2 size={56} className="text-indigo-600 animate-spin mb-4" />
-                    <p className="text-indigo-900 font-bold text-lg animate-pulse">جاري جلب النقاط من قاعدة البيانات...</p>
+                    <p className="text-indigo-900 font-bold text-lg animate-pulse">جاري جلب النتائج العامة...</p>
                 </div>
             ) : null}
 
@@ -143,8 +146,12 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                         <tr className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white shadow-md">
                             <th className="py-6 px-4 text-center w-24 font-bold text-lg opacity-95">#</th>
                             <th className="py-6 px-4 text-right font-bold text-lg opacity-95">اللاعب</th>
-                            <th className="py-6 px-4 text-center font-bold text-lg opacity-95 w-48">الإجابات الصحيحة</th>
-                            <th className="py-6 px-4 text-center font-bold text-lg opacity-95">الجوائز المكتسبة</th>
+                            <th className="py-6 px-4 text-center font-bold text-lg opacity-95 w-48">
+                                <div className="flex items-center justify-center gap-1">
+                                    النقاط (عام) <Globe2 size={16} className="opacity-70" />
+                                </div>
+                            </th>
+                            <th className="py-6 px-4 text-center font-bold text-lg opacity-95">الجوائز</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
@@ -171,7 +178,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                                                 )}
                                             </div>
                                             <div className="flex items-center gap-1 text-xs text-gray-400 mt-1">
-                                                <span>آخر ظهور:</span>
+                                                <span>آخر نشاط:</span>
                                                 <span dir="ltr">{player.lastActive}</span>
                                             </div>
                                         </div>
@@ -184,7 +191,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                                                 </span>
                                                 <CheckCircle2 size={16} className="text-indigo-400" strokeWidth={2.5} />
                                             </div>
-                                            <span className="text-[11px] text-indigo-400 font-bold -mt-1">نقطة</span>
+                                            <span className="text-[11px] text-indigo-400 font-bold -mt-1">اجابة صحيحة</span>
                                         </div>
                                     </td>
                                     <td className="py-5 px-4 text-center">
@@ -232,8 +239,8 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
         {/* Footer/Motivation */}
         <div className="mt-6 text-center">
             <div className="inline-flex items-center gap-2 bg-white/60 backdrop-blur-sm px-6 py-3 rounded-full border border-white shadow-sm text-indigo-800 font-medium text-sm">
-                <Sparkles size={16} className="text-yellow-500" />
-                 يتم جمع النقاط من جميع اللاعبين وترتيبهم مباشرة. استمر في الحل لتصعد للقمة!
+                <Globe2 size={16} className="text-indigo-500" />
+                 هذه القائمة عامة ومباشرة. نافسي صديقاتك لتصلي إلى المركز الأول!
             </div>
         </div>
 
