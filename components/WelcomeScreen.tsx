@@ -1,5 +1,6 @@
+
 import React, { useState } from 'react';
-import { Difficulty, Operation, GameConfig } from '../types';
+import { Difficulty, Operation, GameConfig, getUserDisplayName } from '../types';
 import { Brain, Calculator, ChevronLeft, Zap, Divide, X as MultiplyIcon, Plus, Minus, Trophy, BarChart3, Timer, Star, Crown } from 'lucide-react';
 import { initAudio } from '../services/soundService';
 import { getBadgeDefinitions } from '../services/statsService';
@@ -41,6 +42,9 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   // Determine current rank based on total score
   const badges = getBadgeDefinitions(currentTotalScore);
   const currentBadge = badges.reverse().find(b => b.unlocked) || badges[badges.length -1];
+  
+  // Get Arabic Name for display
+  const displayName = userName ? getUserDisplayName(userName) : '';
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-indigo-50 to-blue-100 text-gray-800 relative">
@@ -79,7 +83,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
             <Calculator size={40} />
           </div>
           <h1 className="text-4xl font-extrabold text-indigo-900 mb-2">
-            {userName ? `أهلاً بك، ${userName}!` : 'العبقري الصغير'}
+            {displayName ? `أهلاً بك، ${displayName}!` : 'العبقري الصغير'}
           </h1>
           
           {/* User Progress Summary (Cross-Device Sync Visualization) */}

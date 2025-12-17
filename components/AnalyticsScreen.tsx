@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import { Home, TrendingUp, Calendar, Award, CheckCircle2, XCircle, Percent, Loader2, RefreshCw, Trophy } from 'lucide-react';
 import { loadStats, getLast7DaysStats, getLeaderboard } from '../services/statsService';
@@ -87,7 +88,7 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
               ملف اللاعب
             </h1>
             <span className="text-indigo-500 font-bold bg-indigo-50 px-4 py-1 rounded-full text-sm mt-1">
-              {player.name}
+              {player.displayName || player.name}
             </span>
           </div>
 

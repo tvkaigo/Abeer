@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { User, ArrowLeft, ChevronDown, Loader2 } from 'lucide-react';
 import { PREDEFINED_USERS } from '../types';
@@ -51,7 +52,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSubmit }) => {
                 <option value="" disabled>اختر اسمك من القائمة...</option>
                 {PREDEFINED_USERS.map((user) => (
                   <option key={user.id} value={user.name}>
-                    {user.name}
+                    {user.displayName}
                   </option>
                 ))}
               </select>

@@ -58,31 +58,39 @@ export interface Badge {
 }
 
 export interface UserStats {
-  id: number; // Added ID
-  name: string; // Added Name
+  id: number;
+  name: string; // Internal English Name/ID
+  displayName?: string; // Added Arabic Display Name
   totalCorrect: number;
   totalIncorrect: number;
   streak: number;
   lastPlayedDate: string | null;
   dailyHistory: Record<string, DailyStat>;
-  badges: Badge[]; // Added Badges list to be stored in cloud
+  badges: Badge[];
 }
 
 export interface LeaderboardEntry {
-  name: string;
+  name: string; // Internal English Name (for logic/comparison)
+  displayName: string; // Added Arabic Display Name (for UI)
   grade: string;
   totalCorrect: number;
   badgesCount: number;
   lastActive: string;
 }
 
-// Predefined Users with IDs as requested
+// Predefined Users with IDs and Arabic Display Names
 export const PREDEFINED_USERS = [
-  { id: 1, name: 'Abeer_Mohammed' },
-  { id: 2, name: 'Abeer_Hanash' },
-  { id: 3, name: 'Nada' },
-  { id: 4, name: 'Asmaa' },
-  { id: 5, name: 'Reem' },
-  { id: 6, name: 'Manal' },
-  { id: 7, name: 'Aisha' }
+  { id: 1, name: 'Abeer_Mohammed', displayName: 'عبير محمد' },
+  { id: 2, name: 'Abeer_Hanash', displayName: 'عبير حنش' },
+  { id: 3, name: 'Nada', displayName: 'ندى' },
+  { id: 4, name: 'Asmaa', displayName: 'أسماء' },
+  { id: 5, name: 'Reem', displayName: 'ريم' },
+  { id: 6, name: 'Manal', displayName: 'منال' },
+  { id: 7, name: 'Aisha', displayName: 'عائشة' }
 ];
+
+// Helper to get Arabic name from English key
+export const getUserDisplayName = (englishName: string): string => {
+  const user = PREDEFINED_USERS.find(u => u.name === englishName);
+  return user ? user.displayName : englishName;
+};

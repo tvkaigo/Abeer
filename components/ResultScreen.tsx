@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect, useRef } from 'react';
-import { GameResult } from '../types';
+import { GameResult, getUserDisplayName } from '../types';
 import { RefreshCcw, Star, Trophy, Frown, Sparkles, Award, PartyPopper, TrendingUp } from 'lucide-react';
 import { getAiFeedback } from '../services/geminiService';
 // @ts-ignore
@@ -87,7 +88,8 @@ const ResultScreen: React.FC<ResultScreenProps> = ({ result, difficulty, onResta
   let colorClass = "";
   let bgClass = "bg-gray-50"; // Default background
 
-  const nameSuffix = userName ? ` يا ${userName}` : '';
+  const displayName = userName ? getUserDisplayName(userName) : '';
+  const nameSuffix = displayName ? ` يا ${displayName}` : '';
 
   if (result.score >= 7) {
     message = `ممتاز، أنت مبدعة${nameSuffix}! 🌟`;

@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Home, Trophy, Medal, Crown, Sparkles, Loader2, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { getLeaderboard, getBadgeStatus } from '../services/statsService';
@@ -161,7 +162,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                                         <div className="flex flex-col">
                                             <div className="flex items-center gap-2">
                                                 <span className={`font-bold text-xl ${isCurrentUser ? 'text-indigo-700' : 'text-slate-800'}`}>
-                                                    {player.name}
+                                                    {player.displayName}
                                                 </span>
                                                 {isCurrentUser && (
                                                     <span className="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-bold border border-indigo-200">
