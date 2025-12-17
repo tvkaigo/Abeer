@@ -42,11 +42,11 @@ const fetchFromCloud = async <T>(key: string): Promise<T | null> => {
     // Add timestamp to prevent browser/network caching
     const response = await fetch(`${CLOUD_API_URL}/${encodedKey}?t=${Date.now()}`);
     if (response.status === 404) return null;
-    if (!response.ok) throw new Error('Network response was not ok');
+    if (!response.ok) throw new Error(`Network response was not ok: ${response.status}`);
     return await response.json();
   } catch (e) {
     console.warn(`Cloud fetch failed for ${key}`, e);
-    return null;
+    throw e; // Re-throw to handle in caller
   }
 };
 
@@ -71,11 +71,14 @@ export const loadStats = async (username: string): Promise<UserStats> => {
   const key = `${USER_STATS_PREFIX}${username}`;
   const initial = getInitialStats(username);
   
-  // 1. Fetch from Cloud
+  // 1. Fetch from Cloud with error handling
   let cloudStats: UserStats | null = null;
+  let cloudFetchFailed = false;
   try {
       cloudStats = await fetchFromCloud<UserStats>(key);
-  } catch (e) { console.warn("Cloud load error"); }
+  } catch (e) { 
+      cloudFetchFailed = true; 
+  }
 
   // 2. Fetch from LocalStorage
   let localStats: UserStats | null = null;
@@ -84,27 +87,42 @@ export const loadStats = async (username: string): Promise<UserStats> => {
       if (localStr) localStats = JSON.parse(localStr);
   } catch (e) { console.warn("Local load error"); }
 
-  // 3. SYNCHRONIZATION LOGIC: "High Score Wins"
-  let bestStats: UserStats = initial;
+  // 3. SYNCHRONIZATION LOGIC
+  // If cloud fetch failed completely (network error), we return local to allow offline play,
+  // BUT we do NOT trigger a sync back to cloud to avoid overwriting good cloud data with stale local data.
+  if (cloudFetchFailed) {
+      if (localStats) return localStats;
+      return initial;
+  }
 
+  let bestStats: UserStats = initial;
   const cloudScore = cloudStats?.totalCorrect || 0;
   const localScore = localStats?.totalCorrect || 0;
+  
+  const cloudIncorrect = cloudStats?.totalIncorrect || 0;
+  const localIncorrect = localStats?.totalIncorrect || 0;
 
+  // Compare Logic: Correct Answers > Incorrect Answers > Prefer Cloud
   if (cloudScore > localScore) {
-      // Cloud is newer/better. Use Cloud and update Local.
+      // Cloud is ahead. Update Local.
       bestStats = { ...initial, ...cloudStats };
       localStorage.setItem(key, JSON.stringify(bestStats));
   } else if (localScore > cloudScore) {
-      // Local is newer/better. Use Local and update Cloud.
+      // Local is ahead. Update Cloud.
       bestStats = { ...initial, ...localStats };
       saveToCloud(key, bestStats); 
   } else {
-      // Equal or both null. Prefer Cloud.
-      if (cloudStats) bestStats = { ...initial, ...cloudStats };
-      else if (localStats) bestStats = { ...initial, ...localStats };
+      // Scores Equal. Tie break with Incorrect answers (more play time = better source of truth)
+      if (cloudIncorrect >= localIncorrect) {
+          bestStats = cloudStats ? { ...initial, ...cloudStats } : { ...initial, ...localStats || {} };
+          if (cloudStats) localStorage.setItem(key, JSON.stringify(bestStats));
+      } else {
+          bestStats = { ...initial, ...localStats };
+          saveToCloud(key, bestStats);
+      }
   }
 
-  // 4. Recalculate Badges
+  // 4. Recalculate Badges & Ensure Consistency
   bestStats.badges = getBadgeDefinitions(bestStats.totalCorrect);
   if (!bestStats.dailyHistory) bestStats.dailyHistory = {};
 
@@ -114,7 +132,7 @@ export const loadStats = async (username: string): Promise<UserStats> => {
 export const updateUserStats = async (result: GameResult, username: string): Promise<UserStats> => {
   if (!username) return getInitialStats();
 
-  // 1. Load current best stats
+  // 1. Load current best stats (Sync first)
   let stats = await loadStats(username);
   
   const today = getTodayDateString();
@@ -154,11 +172,12 @@ export const updateUserStats = async (result: GameResult, username: string): Pro
   // 3. Save to Storage
   const key = `${USER_STATS_PREFIX}${username}`;
   localStorage.setItem(key, JSON.stringify(stats)); 
+  
+  // We save to cloud regardless here to ensure progress is captured. 
+  // loadStats handled the safety check for base data.
   await saveToCloud(key, stats); 
 
   // 4. Trigger Leaderboard Update (Cache Refresh)
-  // We don't await this to keep UI snappy, or we can. 
-  // Since getLeaderboard fetches all, we just fire this off to update the global cache file.
   updateLeaderboard(username, "-", stats.totalCorrect);
 
   return stats;
@@ -167,11 +186,6 @@ export const updateUserStats = async (result: GameResult, username: string): Pro
 // --- Leaderboard Logic ---
 
 export const getLeaderboard = async (forceSync: boolean = false): Promise<LeaderboardEntry[]> => {
-  // Strategy: DYNAMIC CONSTRUCTION
-  // To ensure absolute consistency across devices and avoid race conditions in a single file,
-  // we fetch the individual stats for ALL predefined users. 
-  // Since n=7, this is efficient and robust.
-
   const fetchPromises = PREDEFINED_USERS.map(async (user) => {
       const key = `${USER_STATS_PREFIX}${user.name}`;
       let stats: UserStats | null = null;
@@ -179,27 +193,37 @@ export const getLeaderboard = async (forceSync: boolean = false): Promise<Leader
       // 1. Try Cloud (Primary Source of Truth for other users)
       try {
           stats = await fetchFromCloud<UserStats>(key);
+          // NEW: Cache successful cloud fetch to local storage. 
+          // This ensures that this device remembers the latest scores of OTHER users too,
+          // providing better offline support and faster subsequent checks.
+          if (stats) {
+              localStorage.setItem(key, JSON.stringify(stats));
+          }
       } catch (e) {}
 
-      // 2. Try Local (Primary Source of Truth for CURRENT user on THIS device)
-      // If I just played, my local might be ahead of cloud.
+      // 2. Try Local (Fallback or Primary if I am the user)
       try {
           const localStr = localStorage.getItem(key);
           if (localStr) {
               const localStats = JSON.parse(localStr);
-              // Simple High Score check
-              if (!stats || localStats.totalCorrect > stats.totalCorrect) {
+              // Check Score AND Incorrect for Tie-Break
+              const cloudScore = stats?.totalCorrect || 0;
+              const localScore = localStats.totalCorrect || 0;
+              
+              if (!stats || localScore > cloudScore) {
                   stats = localStats;
+              } else if (localScore === cloudScore) {
+                 if ((localStats.totalIncorrect || 0) > (stats.totalIncorrect || 0)) {
+                    stats = localStats;
+                 }
               }
           }
       } catch (e) {}
 
-      // 3. Fallback
       if (!stats) {
           stats = getInitialStats(user.name);
       }
 
-      // 4. Calculate derived data
       const badgesCount = getBadgeDefinitions(stats.totalCorrect || 0).filter(b => b.unlocked).length;
 
       return {
@@ -211,10 +235,8 @@ export const getLeaderboard = async (forceSync: boolean = false): Promise<Leader
       } as LeaderboardEntry;
   });
 
-  // Execute all fetches in parallel
   const results = await Promise.all(fetchPromises);
 
-  // Sort: Highest Score first
   const sorted = results.sort((a, b) => {
      if (b.totalCorrect !== a.totalCorrect) {
          return b.totalCorrect - a.totalCorrect;
@@ -222,25 +244,27 @@ export const getLeaderboard = async (forceSync: boolean = false): Promise<Leader
      return a.name.localeCompare(b.name, 'ar');
   });
 
-  // Save the constructed list to the global cache key (for potential other uses)
-  // We don't await this; it's just a background sync.
+  // Background cache update
   saveToCloud(LEADERBOARD_KEY, sorted);
 
   return sorted;
 };
 
 export const registerNewPlayer = async (name: string, grade: string) => {
-    // No-op for dynamic leaderboard, just ensures stats init
     const key = `${USER_STATS_PREFIX}${name}`;
-    const exists = await fetchFromCloud(key);
-    if (!exists) {
-        await saveToCloud(key, getInitialStats(name));
+    try {
+        const exists = await fetchFromCloud(key);
+        // Only initialize if explicitly Not Found (404). 
+        // If fetch throws (Network Error), we skip to prevent overwriting valid data.
+        if (exists === null) {
+            await saveToCloud(key, getInitialStats(name));
+        }
+    } catch (e) {
+        console.warn("Registration skipped due to network error to protect data.");
     }
 };
 
 export const updateLeaderboard = async (name: string, grade: string, newTotalScore: number) => {
-  // We just trigger a rebuild of the cache. 
-  // The actual data is in stats_{name} which is already saved by updateUserStats.
   return getLeaderboard(true);
 };
 

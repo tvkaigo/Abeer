@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Home, Trophy, Medal, Crown, Sparkles, Loader2, RefreshCw, CheckCircle2, User } from 'lucide-react';
+import { Home, Trophy, Medal, Crown, Sparkles, Loader2, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { getLeaderboard, getBadgeStatus } from '../services/statsService';
 import { LeaderboardEntry } from '../types';
 
@@ -15,19 +15,26 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
 
   const fetchLeaders = useCallback(async (showLoader = true) => {
     if (showLoader) setIsRefreshing(true);
-    const data = await getLeaderboard(true); // Force fetch from cloud
-    setLeaders(data);
-    setIsLoading(false);
-    if (showLoader) setIsRefreshing(false);
+    
+    try {
+        // Force fetch from cloud to get latest data
+        const data = await getLeaderboard(true);
+        setLeaders(data);
+    } catch (error) {
+        console.error("Failed to fetch leaderboard:", error);
+    } finally {
+        setIsLoading(false);
+        if (showLoader) setIsRefreshing(false);
+    }
   }, []);
 
   useEffect(() => {
     fetchLeaders(false); // Initial load
     
-    // Poll for updates every 5 seconds to ensure real-time feel
+    // Poll for updates every 10 seconds to keep data fresh without overwhelming
     const interval = setInterval(() => {
          fetchLeaders(false);
-    }, 5000);
+    }, 10000);
     return () => clearInterval(interval);
   }, [fetchLeaders]);
 
@@ -97,7 +104,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
             onClick={handleRefresh}
             disabled={isRefreshing}
             className={`bg-white p-3 rounded-2xl shadow-sm text-indigo-600 hover:shadow-md transition-all border border-gray-100 ${isRefreshing ? 'opacity-70 cursor-not-allowed' : 'hover:scale-105 active:scale-95'}`}
-            title="تحديث القائمة"
+            title={isRefreshing ? "جاري التحديث..." : "تحديث القائمة"}
           >
             <RefreshCw size={24} className={isRefreshing ? 'animate-spin' : ''} />
           </button>
