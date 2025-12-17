@@ -4,7 +4,6 @@ import { UserStats, GameResult, LeaderboardEntry, PREDEFINED_USERS, Badge } from
 // Using v4 bucket for global consistency
 const CLOUD_API_URL = 'https://kvdb.io/beta/math-genius-live-v4';
 const USER_STATS_PREFIX = 'stats_';
-const LEADERBOARD_KEY = 'leaderboard_global';
 
 const getTodayDateString = (): string => {
   return new Date().toISOString().split('T')[0];
@@ -46,7 +45,7 @@ const fetchFromCloud = async <T>(key: string): Promise<T | null> => {
     return await response.json();
   } catch (e) {
     console.warn(`Cloud fetch failed for ${key}`, e);
-    throw e; // Re-throw to handle in caller
+    return null; // Return null on failure to allow fallback logic if needed
   }
 };
 
@@ -71,14 +70,8 @@ export const loadStats = async (username: string): Promise<UserStats> => {
   const key = `${USER_STATS_PREFIX}${username}`;
   const initial = getInitialStats(username);
   
-  // 1. Fetch from Cloud with error handling
-  let cloudStats: UserStats | null = null;
-  let cloudFetchFailed = false;
-  try {
-      cloudStats = await fetchFromCloud<UserStats>(key);
-  } catch (e) { 
-      cloudFetchFailed = true; 
-  }
+  // 1. Fetch from Cloud
+  let cloudStats: UserStats | null = await fetchFromCloud<UserStats>(key);
 
   // 2. Fetch from LocalStorage
   let localStats: UserStats | null = null;
@@ -89,11 +82,7 @@ export const loadStats = async (username: string): Promise<UserStats> => {
 
   // 3. SYNCHRONIZATION LOGIC (Merge Strategy: Highest Score Wins)
   
-  // If cloud failed completely, fallback to local to allow offline play
-  if (cloudFetchFailed) {
-      if (localStats) return localStats;
-      return initial;
-  }
+  if (!cloudStats && !localStats) return initial;
 
   let bestStats: UserStats = initial;
   const cloudScore = cloudStats?.totalCorrect || 0;
@@ -111,8 +100,6 @@ export const loadStats = async (username: string): Promise<UserStats> => {
   } else {
       // Scores Equal. Prefer Cloud object if exists to get latest metadata, else Local.
       bestStats = cloudStats ? { ...initial, ...cloudStats } : { ...initial, ...localStats || {} };
-      // Ensure consistency
-      if (cloudStats && !localStats) localStorage.setItem(key, JSON.stringify(bestStats));
   }
 
   // 4. Recalculate Badges & Ensure Consistency
@@ -171,31 +158,24 @@ export const updateUserStats = async (result: GameResult, username: string): Pro
   // Save Cloud (Critical for real-time leaderboard)
   await saveToCloud(key, stats); 
 
-  // 4. Trigger Leaderboard Update logic (optional, but good practice)
-  // We don't await this to keep UI responsive
-  updateLeaderboard(username, "-", stats.totalCorrect);
-
   return stats;
 };
 
 // --- Leaderboard Logic ---
 
 export const getLeaderboard = async (forceSync: boolean = false): Promise<LeaderboardEntry[]> => {
-  // We map over ALL predefined users to check their stats
+  // Loop through ALL predefined users to build the global leaderboard
   const fetchPromises = PREDEFINED_USERS.map(async (user) => {
       const key = `${USER_STATS_PREFIX}${user.name}`;
       let stats: UserStats | null = null;
 
       // 1. Try Cloud (Primary Source for Leaderboard)
+      // We explicitly fetch each user's data from the cloud DB
       try {
           stats = await fetchFromCloud<UserStats>(key);
-          // If we got cloud data, update our local cache of THIS user so we have it for next time
-          if (stats) {
-             localStorage.setItem(key, JSON.stringify(stats));
-          }
       } catch (e) {}
 
-      // 2. If Cloud failed or is empty, try Local
+      // 2. If Cloud failed or is empty, try Local (Fall back to see at least self or cached others)
       if (!stats) {
          try {
             const localStr = localStorage.getItem(key);
@@ -203,25 +183,29 @@ export const getLeaderboard = async (forceSync: boolean = false): Promise<Leader
          } catch (e) {}
       }
 
-      // 3. If still nothing, init empty
+      // 3. If still nothing, assume new player with 0 stats
       if (!stats) {
           stats = getInitialStats(user.name);
       }
 
       const badgesCount = getBadgeDefinitions(stats.totalCorrect || 0).filter(b => b.unlocked).length;
 
+      // Construct the entry
+      // We map 'totalCorrect' directly as this is the metric for the leaderboard
       return {
           name: user.name,
           grade: '-', 
           totalCorrect: stats.totalCorrect || 0,
           badgesCount: badgesCount,
           lastActive: stats.lastPlayedDate || 'جديد'
-      } as LeaderboardEntry;
+      } as LeaderboardEntry & { totalIncorrect: number }; // Extended type for internal sorting
   });
 
   const results = await Promise.all(fetchPromises);
 
-  // Sort by Total Correct Descending
+  // Sort Logic:
+  // 1. Highest Total Correct Answers wins.
+  // 2. Tie-breaker: Alphabetical order.
   const sorted = results.sort((a, b) => {
      if (b.totalCorrect !== a.totalCorrect) {
          return b.totalCorrect - a.totalCorrect;
@@ -236,7 +220,7 @@ export const registerNewPlayer = async (name: string, grade: string) => {
     const key = `${USER_STATS_PREFIX}${name}`;
     try {
         const exists = await fetchFromCloud(key);
-        // Only initialize if explicitly Not Found (404). 
+        // Only initialize if explicitly Not Found (404/null). 
         if (exists === null) {
             await saveToCloud(key, getInitialStats(name));
         }
@@ -246,6 +230,7 @@ export const registerNewPlayer = async (name: string, grade: string) => {
 };
 
 export const updateLeaderboard = async (name: string, grade: string, newTotalScore: number) => {
+  // This function is kept for interface compatibility but getLeaderboard does the heavy lifting
   return getLeaderboard(true);
 };
 

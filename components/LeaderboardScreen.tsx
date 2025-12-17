@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Home, Trophy, Medal, Crown, Sparkles, Loader2, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { getLeaderboard, getBadgeStatus } from '../services/statsService';
 import { LeaderboardEntry } from '../types';
@@ -12,32 +12,46 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
   const [leaders, setLeaders] = useState<LeaderboardEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  // Cache state to prevent spamming the API
+  const lastFetchTimeRef = useRef<number>(0);
+  const CACHE_DURATION = 15000; // 15 seconds cache
 
-  // Function to fetch data, wrapped in useCallback to be used in useEffect
-  const fetchLeaders = useCallback(async (showLoader = true) => {
-    if (showLoader) setIsRefreshing(true);
-    
+  const fetchLeaders = useCallback(async (force = false) => {
+    const now = Date.now();
+    const hasData = leaders.length > 0;
+    const isCacheValid = (now - lastFetchTimeRef.current < CACHE_DURATION);
+
+    if (!force && hasData && isCacheValid) {
+        return;
+    }
+
+    if (force) {
+        setIsRefreshing(true);
+    } else if (!hasData) {
+        setIsLoading(true);
+    }
+
     try {
-        // forceSync true isn't strictly necessary with the new logic, 
-        // but calling getLeaderboard grabs fresh cloud data.
-        const data = await getLeaderboard(true);
+        // Fetch fresh data for ALL users from the database
+        const data = await getLeaderboard(force);
         setLeaders(data);
+        lastFetchTimeRef.current = Date.now();
     } catch (error) {
         console.error("Failed to fetch leaderboard:", error);
     } finally {
         setIsLoading(false);
-        if (showLoader) setIsRefreshing(false);
+        setIsRefreshing(false);
     }
-  }, []);
+  }, [leaders.length]);
 
   useEffect(() => {
-    fetchLeaders(false); // Initial load without full refresh spinner if possible
+    fetchLeaders(false); // Initial load
     
-    // Poll for updates every 15 seconds to keep data fresh across devices
+    // Auto-refresh every 15 seconds to sync other players' scores
     const interval = setInterval(() => {
-         fetchLeaders(false); // Background refresh
+         fetchLeaders(false);
     }, 15000);
-
     return () => clearInterval(interval);
   }, [fetchLeaders]);
 
@@ -100,7 +114,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                 </div>
             </div>
             <h1 className="text-3xl font-black text-slate-800 tracking-tight">قائمة الأبطال</h1>
-            <p className="text-slate-500 text-sm font-medium">نتائج مباشرة لجميع اللاعبين</p>
+            <p className="text-slate-500 text-sm font-medium">مجموع الإجابات الصحيحة (الكل)</p>
           </div>
           
           <button 
@@ -118,7 +132,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
             {isLoading && leaders.length === 0 ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/90 z-20 backdrop-blur-sm">
                     <Loader2 size={56} className="text-indigo-600 animate-spin mb-4" />
-                    <p className="text-indigo-900 font-bold text-lg animate-pulse">جاري جلب أحدث النتائج...</p>
+                    <p className="text-indigo-900 font-bold text-lg animate-pulse">جاري جلب النقاط من قاعدة البيانات...</p>
                 </div>
             ) : null}
 
@@ -137,7 +151,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                             const isCurrentUser = player.name === currentUser;
                             const unlockedBadges = getBadgeStatus(player.totalCorrect).filter(b => b.unlocked);
 
-                            // Using player name as key for better reconciliation than index
+                            // Using player name as key
                             return (
                                 <tr key={player.name} className={getRowStyle(index, isCurrentUser)}>
                                     <td className="py-5 px-4 flex justify-center items-center h-full">
@@ -169,7 +183,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                                                 </span>
                                                 <CheckCircle2 size={16} className="text-indigo-400" strokeWidth={2.5} />
                                             </div>
-                                            <span className="text-[11px] text-indigo-400 font-bold -mt-1">إجابة صحيحة</span>
+                                            <span className="text-[11px] text-indigo-400 font-bold -mt-1">نقطة</span>
                                         </div>
                                     </td>
                                     <td className="py-5 px-4 text-center">
@@ -218,7 +232,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
         <div className="mt-6 text-center">
             <div className="inline-flex items-center gap-2 bg-white/60 backdrop-blur-sm px-6 py-3 rounded-full border border-white shadow-sm text-indigo-800 font-medium text-sm">
                 <Sparkles size={16} className="text-yellow-500" />
-                 القائمة ترتب الأبطال حسب مجموع إجاباتهم الصحيحة المتراكمة. استمر في اللعب لتتصدر!
+                 يتم جمع النقاط من جميع اللاعبين وترتيبهم مباشرة. استمر في الحل لتصعد للقمة!
             </div>
         </div>
 
