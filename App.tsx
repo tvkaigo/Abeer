@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import WelcomeScreen from './components/WelcomeScreen';
 import GameScreen from './components/GameScreen';
@@ -8,6 +9,7 @@ import UserEntryModal from './components/UserEntryModal';
 import { AppState, GameConfig, GameResult, Question, Difficulty, Operation } from './types';
 import { generateQuestions } from './services/mathService';
 import { updateUserStats, registerNewPlayer, loadStats } from './services/statsService';
+import { Loader2, CloudDownload } from 'lucide-react';
 
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.WELCOME);
@@ -17,6 +19,9 @@ const App: React.FC = () => {
   const [highScore, setHighScore] = useState<number>(0);
   const [isNewHighScore, setIsNewHighScore] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState(false);
+  
+  // Loading state for initial profile sync
+  const [isSyncingProfile, setIsSyncingProfile] = useState(false);
   
   // Stores the cumulative score fetched from cloud/local storage
   const [currentTotalScore, setCurrentTotalScore] = useState<number>(0);
@@ -41,15 +46,22 @@ const App: React.FC = () => {
   useEffect(() => {
     const syncUserProfile = async () => {
       if (userData?.name) {
+        setIsSyncingProfile(true); // Start loading screen
         try {
           // loadStats handles the merge logic (Cloud vs Local)
+          // It prioritizes the highest score, allowing cross-device persistence
           const stats = await loadStats(userData.name);
           setCurrentTotalScore(stats.totalCorrect);
           
           // Also ensure they are registered/updated in the background
-          registerNewPlayer(userData.name, userData.grade);
+          await registerNewPlayer(userData.name, userData.grade);
         } catch (err) {
           console.error("Background profile sync failed:", err);
+        } finally {
+          // Delay slightly to let the animation finish and feel smooth
+          setTimeout(() => {
+            setIsSyncingProfile(false); // Stop loading screen
+          }, 800);
         }
       }
     };
@@ -72,8 +84,7 @@ const App: React.FC = () => {
     setUserData(data);
     localStorage.setItem('mathGeniusUserData', JSON.stringify(data));
     
-    // 2. We don't need to manually call sync here because the useEffect [userData] 
-    // will trigger immediately after setUserData, performing the cloud fetch.
+    // 2. The useEffect [userData] will trigger immediately and handle the sync/loading UI
   };
 
   const handleStartGame = (config: GameConfig) => {
@@ -144,6 +155,24 @@ const App: React.FC = () => {
   const handleBackToWelcome = () => {
     setAppState(AppState.WELCOME);
   };
+
+  // Render Cloud Sync Loading Screen
+  if (isSyncingProfile) {
+    return (
+        <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-blue-100 flex flex-col items-center justify-center p-4">
+            <div className="bg-white/80 backdrop-blur-md p-8 rounded-3xl shadow-xl flex flex-col items-center animate-pop-in">
+                <div className="relative">
+                    <CloudDownload size={64} className="text-indigo-600 mb-4 animate-bounce" />
+                    <div className="absolute bottom-0 right-0">
+                        <Loader2 size={24} className="text-indigo-400 animate-spin" />
+                    </div>
+                </div>
+                <h2 className="text-xl font-bold text-indigo-900 mb-2">جاري استعادة بياناتك...</h2>
+                <p className="text-gray-500 text-sm">نبحث عن نقاطك ومستواك في السحابة</p>
+            </div>
+        </div>
+    );
+  }
 
   return (
     <div className="min-h-screen text-slate-800 font-sans">
