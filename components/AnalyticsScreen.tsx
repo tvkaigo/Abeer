@@ -22,7 +22,8 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
         // loadStats now handles the sync between Cloud and Local internally
         const [userData, leaderboardData] = await Promise.all([
             loadStats(userName),
-            getLeaderboard(false)
+            // Fix: getLeaderboard in statsService.ts does not take any arguments
+            getLeaderboard()
         ]);
         
         setPlayer(userData);

@@ -59,8 +59,8 @@ export interface Badge {
 
 export interface UserStats {
   id: number;
-  name: string; // Internal English Name/ID
-  displayName?: string; // Added Arabic Display Name
+  name: string;
+  displayName?: string;
   totalCorrect: number;
   totalIncorrect: number;
   streak: number;
@@ -70,15 +70,13 @@ export interface UserStats {
 }
 
 export interface LeaderboardEntry {
-  name: string; // Internal English Name (for logic/comparison)
-  displayName: string; // Added Arabic Display Name (for UI)
-  grade: string;
+  name: string;
+  displayName: string;
   totalCorrect: number;
   badgesCount: number;
   lastActive: string;
 }
 
-// Predefined Users with IDs and Arabic Display Names
 export const PREDEFINED_USERS = [
   { id: 1, name: 'Abeer_Mohammed', displayName: 'عبير محمد' },
   { id: 2, name: 'Abeer_Hanash', displayName: 'عبير حنش' },
@@ -89,7 +87,6 @@ export const PREDEFINED_USERS = [
   { id: 7, name: 'Aisha', displayName: 'عائشة' }
 ];
 
-// Helper to get Arabic name from English key
 export const getUserDisplayName = (englishName: string): string => {
   const user = PREDEFINED_USERS.find(u => u.name === englishName);
   return user ? user.displayName : englishName;

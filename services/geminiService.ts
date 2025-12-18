@@ -1,40 +1,44 @@
+
 import { GoogleGenAI } from "@google/genai";
 import { Question } from "../types";
 
-const apiKey = process.env.API_KEY || '';
-const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
+// Always initialize the client using the API key obtained from process.env.API_KEY.
+// Recommendation: Create the instance right before the API call to ensure use of the correct key.
 
 export const getAiFeedback = async (score: number, history: Question[], difficulty: string): Promise<string> => {
-  if (!ai) {
-    return "عذراً، خدمة الذكاء الاصطناعي غير متوفرة حالياً. يرجى التحقق من مفتاح API.";
-  }
+  // Ensure strict adherence to initialization guidelines
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   const wrongAnswers = history.filter(q => !q.isCorrect);
   
   const prompt = `
-    أنت معلم رياضيات ذكي وداعم للأطفال.
-    قام طالب بإنهاء اختبار رياضيات بمستوى صعوبة "${difficulty}".
-    النتيجة: ${score} من 10.
+    أنت معلم رياضيات ودود جداً ومشجع للأطفال.
+    قام طالب بإنهاء اختبار رياضيات بمستوى "${difficulty}".
+    النتيجة: ${score} من ${history.length}.
     
-    تفاصيل الأخطاء (إن وجدت):
-    ${wrongAnswers.map(q => `سؤال: ${q.num1} ${q.operation} ${q.num2} = ؟ (الإجابة الصحيحة: ${q.correctAnswer}، إجابة الطالب: ${q.userAnswer})`).join('\n')}
+    تفاصيل الأخطاء:
+    ${wrongAnswers.map(q => `سؤال: ${q.num1} ${q.operation} ${q.num2} = ؟ (الصح: ${q.correctAnswer}، إجابة الطالب: ${q.userAnswer})`).join('\n')}
 
-    المطلوب:
-    1. قدم رسالة تشجيعية قصيرة جداً ومناسبة للنتيجة.
-    2. إذا كانت هناك أخطاء، اشرح بلطف وبساطة كيف يمكن للطالب تحسين مهاراته في هذا النوع من المسائل.
-    3. إذا كانت النتيجة كاملة، قدم تحدياً ذهنياً صغيراً أو معلومة ممتعة عن الرياضيات.
+    المطلوب منك:
+    1. رسالة تشجيعية قصيرة (سطر واحد) تناسب مستواه.
+    2. نصيحة بسيطة جداً للتحسن في المسائل التي أخطأ فيها.
+    3. إذا كانت النتيجة كاملة، أعطه حقيقة ممتعة عن الأرقام.
     
-    اجعل الرد باللغة العربية، بأسلوب مرح ومناسب للأطفال، ولا يتجاوز 4 أسطر.
+    اجعل الرد باللغة العربية، بأسلوب مرح وقصير جداً (لا يتجاوز 3 أسطر).
   `;
 
   try {
+    // Call generateContent with both the model name and the prompt.
+    // gemini-3-flash-preview is suitable for basic text feedback tasks.
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       contents: prompt,
     });
-    return response.text || "أحسنت! واصل التدريب.";
+    
+    // The text content is directly accessible via the .text property of the response object.
+    return response.text || "أداء رائع! واصل التدريب لتصبح عبقري الرياضيات الأول.";
   } catch (error) {
     console.error("Gemini API Error:", error);
-    return "أحسنت محاولة جيدة! استمر في التدريب لتصبح أفضل.";
+    return "محاولة ممتازة! استمر في حل المسائل لتطور مهاراتك أكثر.";
   }
 };

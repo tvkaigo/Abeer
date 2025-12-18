@@ -19,94 +19,58 @@ const App: React.FC = () => {
   const [highScore, setHighScore] = useState<number>(0);
   const [isNewHighScore, setIsNewHighScore] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState(false);
-  
-  // Loading state for initial profile sync
   const [isSyncingProfile, setIsSyncingProfile] = useState(false);
-  
-  // Stores the cumulative score fetched from cloud/local storage
   const [currentTotalScore, setCurrentTotalScore] = useState<number>(0);
-  
-  // Track custom time limit (e.g., 60s for Quick Test)
   const [timeLimit, setTimeLimit] = useState<number>(120);
 
-  // Initialize user data from localStorage if available
-  const [userData, setUserData] = useState<{name: string, grade: string} | null>(() => {
+  const [userData, setUserData] = useState<{name: string} | null>(() => {
     try {
       const saved = localStorage.getItem('mathGeniusUserData');
       return saved ? JSON.parse(saved) : null;
-    } catch (e) {
-      console.error("Failed to parse user data", e);
-      return null;
-    }
+    } catch { return null; }
   });
 
-  // Synchronization Effect: Runs on mount AND when user logs in
-  // This ensures that if I played on Device A, then open Device B, 
-  // Device B fetches my latest stats immediately.
   useEffect(() => {
     const syncUserProfile = async () => {
       if (userData?.name) {
-        setIsSyncingProfile(true); // Start loading screen
+        setIsSyncingProfile(true);
         try {
-          // loadStats handles the merge logic (Cloud vs Local)
-          // It prioritizes the highest score, allowing cross-device persistence
           const stats = await loadStats(userData.name);
           setCurrentTotalScore(stats.totalCorrect);
-          
-          // Also ensure they are registered/updated in the background
-          await registerNewPlayer(userData.name, userData.grade);
+          await registerNewPlayer(userData.name);
         } catch (err) {
-          console.error("Background profile sync failed:", err);
+          console.error("Profile sync error", err);
         } finally {
-          // Delay slightly to let the animation finish and feel smooth
-          setTimeout(() => {
-            setIsSyncingProfile(false); // Stop loading screen
-          }, 800);
+          setTimeout(() => setIsSyncingProfile(false), 800);
         }
       }
     };
-    
     syncUserProfile();
-  }, [userData]); 
+  }, [userData?.name]); 
 
   useEffect(() => {
     const savedScore = localStorage.getItem('mathGeniusHighScore');
-    if (savedScore) {
-      setHighScore(parseInt(savedScore, 10));
-    }
+    if (savedScore) setHighScore(parseInt(savedScore, 10));
   }, []);
 
   const handleUserEntry = async (name: string) => {
-    const grade = "-";
-    const data = { name, grade };
-    
-    // 1. Set Local Data Immediately
+    const data = { name };
     setUserData(data);
     localStorage.setItem('mathGeniusUserData', JSON.stringify(data));
-    
-    // 2. The useEffect [userData] will trigger immediately and handle the sync/loading UI
   };
 
   const handleStartGame = (config: GameConfig) => {
     setCurrentConfig(config);
-    // Standard game: 2 minutes
     setTimeLimit(120);
-    const newQuestions = generateQuestions(config.difficulty, config.operation);
-    setQuestions(newQuestions);
+    setQuestions(generateQuestions(config.difficulty, config.operation));
     setAppState(AppState.PLAYING);
   };
 
   const handleQuickStart = () => {
-    // Quick Test: Beginner, Mixed Operations, 5 Questions, 60 seconds
-    const difficulty = Difficulty.BEGINNER;
-    const operation = Operation.MIXED;
-    const config = { difficulty, operation };
-    
+    const config = { difficulty: Difficulty.BEGINNER, operation: Operation.MIXED };
     setCurrentConfig(config);
-    setTimeLimit(60); // 1 Minute only
-    
-    const newQuestions = generateQuestions(difficulty, operation, 5);
-    setQuestions(newQuestions);
+    setTimeLimit(60);
+    setQuestions(generateQuestions(config.difficulty, config.operation, 5));
     setAppState(AppState.PLAYING);
   };
 
@@ -114,17 +78,13 @@ const App: React.FC = () => {
     setIsSaving(true);
     setGameResult(result);
     
-    // Update Persistent Stats (Cloud & Analytics) - only if user is logged in
     if (userData) {
         try {
             const stats = await updateUserStats(result, userData.name);
             setCurrentTotalScore(stats.totalCorrect);
-        } catch (e) {
-            console.error("Failed to update cloud stats", e);
-        }
+        } catch (e) { console.error("Cloud update error", e); }
     }
 
-    // Update Local Session High Score (only for standard 10 question games usually, but we can track all or segment)
     if (result.score > highScore) {
       setHighScore(result.score);
       setIsNewHighScore(true);
@@ -140,35 +100,19 @@ const App: React.FC = () => {
   const handleRestart = () => {
     setAppState(AppState.WELCOME);
     setGameResult(null);
-    setQuestions([]);
     setIsNewHighScore(false);
   };
 
-  const handleShowAnalytics = () => {
-    setAppState(AppState.ANALYTICS);
-  };
-
-  const handleShowLeaderboard = () => {
-    setAppState(AppState.LEADERBOARD);
-  };
-
-  const handleBackToWelcome = () => {
-    setAppState(AppState.WELCOME);
-  };
-
-  // Render Cloud Sync Loading Screen
   if (isSyncingProfile) {
     return (
-        <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-blue-100 flex flex-col items-center justify-center p-4">
+        <div className="min-h-screen bg-indigo-50 flex flex-col items-center justify-center p-4">
             <div className="bg-white/80 backdrop-blur-md p-8 rounded-3xl shadow-xl flex flex-col items-center animate-pop-in">
-                <div className="relative">
-                    <CloudDownload size={64} className="text-indigo-600 mb-4 animate-bounce" />
-                    <div className="absolute bottom-0 right-0">
-                        <Loader2 size={24} className="text-indigo-400 animate-spin" />
-                    </div>
+                <CloudDownload size={64} className="text-indigo-600 mb-4 animate-bounce" />
+                <h2 className="text-xl font-bold text-indigo-900 mb-2 text-center">جاري استعادة بياناتك...</h2>
+                <div className="flex items-center gap-2 text-gray-500 text-sm">
+                    <Loader2 size={16} className="animate-spin" />
+                    <span>نبحث عن نقاطك في السحابة</span>
                 </div>
-                <h2 className="text-xl font-bold text-indigo-900 mb-2">جاري استعادة بياناتك...</h2>
-                <p className="text-gray-500 text-sm">نبحث عن نقاطك ومستواك في السحابة</p>
             </div>
         </div>
     );
@@ -181,8 +125,8 @@ const App: React.FC = () => {
           <WelcomeScreen 
             onStart={handleStartGame} 
             onQuickStart={handleQuickStart}
-            onShowAnalytics={handleShowAnalytics}
-            onShowLeaderboard={handleShowLeaderboard}
+            onShowAnalytics={() => setAppState(AppState.ANALYTICS)}
+            onShowLeaderboard={() => setAppState(AppState.LEADERBOARD)}
             highScore={highScore}
             userName={userData?.name}
             currentTotalScore={currentTotalScore}
@@ -191,30 +135,9 @@ const App: React.FC = () => {
         </>
       )}
       
-      {appState === AppState.ANALYTICS && (
-        <AnalyticsScreen 
-          onBack={handleBackToWelcome}
-          userName={userData?.name}
-        />
-      )}
-
-      {appState === AppState.LEADERBOARD && (
-        <LeaderboardScreen 
-          onBack={handleBackToWelcome}
-          currentUser={userData?.name}
-        />
-      )}
-
-      {appState === AppState.PLAYING && (
-        <GameScreen 
-          questions={questions} 
-          onEndGame={handleEndGame}
-          onExit={handleRestart}
-          initialTime={timeLimit}
-          isSaving={isSaving}
-        />
-      )}
-
+      {appState === AppState.ANALYTICS && <AnalyticsScreen onBack={handleRestart} userName={userData?.name} />}
+      {appState === AppState.LEADERBOARD && <LeaderboardScreen onBack={handleRestart} currentUser={userData?.name} />}
+      {appState === AppState.PLAYING && <GameScreen questions={questions} onEndGame={handleEndGame} onExit={handleRestart} initialTime={timeLimit} isSaving={isSaving} />}
       {appState === AppState.RESULTS && gameResult && currentConfig && (
         <ResultScreen 
           result={gameResult} 
