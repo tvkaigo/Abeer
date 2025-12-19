@@ -43,7 +43,6 @@ isSupported().then(supported => {
 const USERS_COLLECTION = 'users';
 const TEACHERS_COLLECTION = 'Teachers'; 
 
-// استخدام window.location.origin لضمان صحة الرابط دائماً
 const actionCodeSettings = {
   url: window.location.origin + '/',
   handleCodeInApp: true
@@ -88,11 +87,11 @@ export const completeSignInWithLink = async (): Promise<User> => {
         throw new Error("عذراً، هذا البريد غير مسجل كمعلم مصرح له في النظام.");
     }
 
-    await updateDoc(teacherDocRef, { 
+    await setDoc(teacherDocRef, { 
         uid: result.user.uid, 
         lastLogin: serverTimestamp(),
         active: true
-    });
+    }, { merge: true });
   }
   return result.user;
 };
@@ -109,18 +108,22 @@ export const getBadgeDefinitions = (totalCorrect: number): Badge[] => [
 export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile | null> => {
   if (!uid) return null;
   
-  const studentRef = doc(db, USERS_COLLECTION, uid);
-  const studentSnap = await getDoc(studentRef);
-  if (studentSnap.exists()) {
-    const data = studentSnap.data() as UserStats;
-    return { ...data, uid: studentSnap.id, badges: getBadgeDefinitions(data.totalCorrect || 0) };
-  }
-  
-  const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
-  const tSnap = await getDocs(q);
-  if (!tSnap.empty) {
-    const data = tSnap.docs[0].data();
-    return { ...data, teacherId: tSnap.docs[0].id, role: UserRole.TEACHER } as TeacherProfile;
+  try {
+    const studentRef = doc(db, USERS_COLLECTION, uid);
+    const studentSnap = await getDoc(studentRef);
+    if (studentSnap.exists()) {
+      const data = studentSnap.data() as UserStats;
+      return { ...data, uid: studentSnap.id, badges: getBadgeDefinitions(data.totalCorrect || 0) };
+    }
+    
+    const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
+    const tSnap = await getDocs(q);
+    if (!tSnap.empty) {
+      const docData = tSnap.docs[0].data();
+      return { ...docData, teacherId: tSnap.docs[0].id, role: UserRole.TEACHER } as TeacherProfile;
+    }
+  } catch (error) {
+    console.error("Error in loadStats:", error);
   }
   
   return null;
@@ -128,16 +131,24 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
 
 export const isTeacherByEmail = async (email: string): Promise<boolean> => {
     if (!email) return false;
-    const docRef = doc(db, TEACHERS_COLLECTION, email.trim().toLowerCase());
-    const snap = await getDoc(docRef);
-    return snap.exists();
+    try {
+      const docRef = doc(db, TEACHERS_COLLECTION, email.trim().toLowerCase());
+      const snap = await getDoc(docRef);
+      return snap.exists();
+    } catch {
+      return false;
+    }
 };
 
 export const fetchTeacherInfo = async (teacherId: string): Promise<TeacherProfile | null> => {
   if (!teacherId) return null;
-  const docRef = doc(db, TEACHERS_COLLECTION, teacherId);
-  const docSnap = await getDoc(docRef);
-  if (docSnap.exists()) return { ...docSnap.data(), teacherId: docSnap.id, role: UserRole.TEACHER } as TeacherProfile;
+  try {
+    const docRef = doc(db, TEACHERS_COLLECTION, teacherId);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) return { ...docSnap.data(), teacherId: docSnap.id, role: UserRole.TEACHER } as TeacherProfile;
+  } catch (error) {
+    console.error("Error in fetchTeacherInfo:", error);
+  }
   return null;
 };
 
@@ -165,6 +176,8 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
           callback({ ...data, teacherId: tSnap.docs[0].id, role: UserRole.TEACHER });
         }
     }
+  }, (error) => {
+    console.error("Snapshot error:", error);
   });
 };
 
@@ -173,7 +186,17 @@ export const createOrUpdatePlayerProfile = async (uid: string, email: string, di
     const snap = await getDoc(studentRef);
     if (!snap.exists()) {
         await setDoc(studentRef, {
-            uid, email, displayName, role: UserRole.STUDENT, teacherId: teacherId || '', totalCorrect: 0, totalIncorrect: 0, streak: 0, lastActive: new Date().toISOString(), dailyHistory: {}
+            uid, 
+            email, 
+            displayName: displayName || 'لاعب جديد', 
+            role: UserRole.STUDENT, 
+            teacherId: teacherId || '', 
+            totalCorrect: 0, 
+            totalIncorrect: 0, 
+            streak: 0, 
+            lastActive: new Date().toISOString(), 
+            dailyHistory: {},
+            badgesCount: 0
         });
     } else if (teacherId) {
         await updateDoc(studentRef, { teacherId });
@@ -183,21 +206,38 @@ export const createOrUpdatePlayerProfile = async (uid: string, email: string, di
 export const updateUserStats = async (result: GameResult, uid: string) => {
     const today = getLocalDateString();
     const userRef = doc(db, USERS_COLLECTION, uid);
-    const snap = await getDoc(userRef);
-    if (!snap.exists()) return;
+    
+    // محاولة جلب البيانات الحالية
+    let snap = await getDoc(userRef);
+    
+    if (!snap.exists()) {
+        const user = auth.currentUser;
+        if (user) {
+            await createOrUpdatePlayerProfile(uid, user.email || '', user.displayName || '');
+            snap = await getDoc(userRef);
+        } else {
+            return;
+        }
+    }
     
     const data = snap.data();
+    if (!data) return;
+    
     const dailyHistory = data.dailyHistory || {};
     const todayStats = dailyHistory[today] || { date: today, correct: 0, incorrect: 0 };
     
     todayStats.correct += result.score;
     todayStats.incorrect += (result.totalQuestions - result.score);
 
+    const totalCorrectNow = (data.totalCorrect || 0) + result.score;
+    const badgesCount = getBadgeDefinitions(totalCorrectNow).filter(b => b.unlocked).length;
+
     await updateDoc(userRef, {
         totalCorrect: increment(result.score),
         totalIncorrect: increment(result.totalQuestions - result.score),
         lastActive: new Date().toISOString(),
         lastPlayedDate: today,
+        badgesCount: badgesCount,
         [`dailyHistory.${today}`]: todayStats
     });
 };

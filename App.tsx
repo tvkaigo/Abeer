@@ -31,14 +31,13 @@ const App: React.FC = () => {
                 isLinkSigningIn.current = true;
                 setIsAuthChecking(true);
                 await completeSignInWithLink();
-                // تنظيف الرابط بعد النجاح للعودة للمسار الرئيسي
                 window.history.replaceState({}, document.title, window.location.origin + '/');
             } catch (error: any) {
-                console.error("خطأ في تسجيل الدخول عبر الرابط:", error);
-                alert(error.message || "الرابط غير صالح أو حدث خطأ في الصلاحيات.");
+                console.error("Link sign in error:", error);
+                alert(error.message || "الرابط غير صالح.");
+                setIsAuthChecking(false);
             } finally {
                 isLinkSigningIn.current = false;
-                setIsAuthChecking(false);
             }
         } else {
           setIsAuthChecking(false);
@@ -49,33 +48,46 @@ const App: React.FC = () => {
 
   useEffect(() => {
     let userSubUnsubscribe: () => void = () => {};
+    
     const authUnsubscribe = onAuthStateChanged(auth, async (user) => {
       if (isLinkSigningIn.current) return;
 
       setCurrentUser(user);
       if (user) {
-        // طباعة UID المطلوبة للتحقق
-        console.log("UID:", user.uid);
-
-        const existingProfile = await loadStats(user.uid);
+        setIsAuthChecking(true);
         
-        if (!existingProfile) {
+        // جلب البيانات الأولية فوراً
+        let profile = await loadStats(user.uid);
+        
+        if (!profile) {
             const isTeacher = await isTeacherByEmail(user.email || '');
             if (!isTeacher) {
-                // طالب جديد
                 await createOrUpdatePlayerProfile(user.uid, user.email || '', user.displayName || '');
+                profile = await loadStats(user.uid);
             }
         }
         
+        // تحديث الحالة بالبيانات الأولية لإنهاء حالة "جاري المزامنة" مبكراً
+        if (profile) {
+          setCurrentUserData(profile);
+          setIsAuthChecking(false);
+        }
+        
+        // بدء الاشتراك للتحديثات الحية في الخلفية
         userSubUnsubscribe = subscribeToUserStats(user.uid, (data) => {
           setCurrentUserData(data);
+          setIsAuthChecking(false); // ضمان إيقاف التحميل عند وصول أول تحديث
         });
+
+        // مهلة أمان لإنهاء حالة التحميل بعد 5 ثوانٍ كحد أقصى
+        setTimeout(() => setIsAuthChecking(false), 5000);
       } else {
         setCurrentUserData(null);
         userSubUnsubscribe();
+        setIsAuthChecking(false);
       }
-      setIsAuthChecking(false);
     });
+
     return () => {
       authUnsubscribe();
       userSubUnsubscribe();
@@ -110,7 +122,7 @@ const App: React.FC = () => {
   if (isAuthChecking) return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-indigo-50 font-bold text-indigo-600 gap-4">
       <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-      جاري التحقق من الهوية...
+      جاري مزامنة بيانات البطل...
     </div>
   );
 
