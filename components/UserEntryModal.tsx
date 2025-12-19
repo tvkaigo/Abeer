@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, Mail, Lock, LogIn, UserPlus, Loader2, AlertCircle, UserCheck, ChevronDown, GraduationCap } from 'lucide-react';
-import { auth, createOrUpdatePlayerProfile, fetchAllTeachers, verifyTeacherByEmail } from '../services/statsService';
+import { User, Mail, Lock, LogIn, UserPlus, Loader2, AlertCircle, UserCheck, ChevronDown, GraduationCap, CheckCircle2 } from 'lucide-react';
+import { auth, createOrUpdatePlayerProfile, fetchAllTeachers, sendTeacherSignInLink } from '../services/statsService';
 import { 
     signInWithEmailAndPassword, 
     createUserWithEmailAndPassword, 
@@ -23,15 +23,29 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isFetchingTeachers, setIsFetchingTeachers] = useState(false);
+  const [linkSent, setLinkSent] = useState(false);
 
   useEffect(() => {
     if (mode === 'signup') {
         setIsFetchingTeachers(true);
+        setError('');
         fetchAllTeachers().then(list => {
-            const sorted = [...list].sort((a, b) => a.displayName.localeCompare(b.displayName, 'ar'));
-            setTeachers(sorted);
+            if (list && list.length > 0) {
+              const sorted = [...list].sort((a, b) => a.displayName.localeCompare(b.displayName, 'ar'));
+              setTeachers(sorted);
+            } else {
+              setError("لا يوجد معلمين مسجلين حالياً. لا يمكن إتمام عملية تسجيل الطلاب في الوقت الحالي.");
+              setTeachers([]);
+            }
             setIsFetchingTeachers(false);
-        }).catch(() => setIsFetchingTeachers(false));
+        }).catch((err) => {
+            setError("عذراً، فشل جلب قائمة المعلمين من النظام. يرجى التحقق من اتصالك بالإنترنت.");
+            setIsFetchingTeachers(false);
+            setTeachers([]);
+        });
+    } else {
+        setError('');
+        setLinkSent(false);
     }
   }, [mode]);
 
@@ -42,17 +56,12 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
 
     try {
       if (mode === 'teacher') {
-        // التحقق من المعلم بالبريد فقط بناءً على طلب المستخدم
-        const teacher = await verifyTeacherByEmail(email.trim());
-        if (teacher) {
-            onSuccess(teacher);
-        } else {
-            throw new Error("هذا البريد غير مسجل كمعلم في النظام");
-        }
+        await sendTeacherSignInLink(email.trim());
+        setLinkSent(true);
       } else if (mode === 'signup') {
         const nameToSave = displayName.trim();
         if (!nameToSave) throw new Error("يرجى إدخال اسمك بالعربية");
-        if (!teacherId) throw new Error("يرجى اختيار معلمك من القائمة");
+        if (!teacherId) throw new Error("يرجى اختيار معلمك من القائمة لإكمال التسجيل");
         
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         await createOrUpdatePlayerProfile(userCredential.user.uid, email, nameToSave, teacherId);
@@ -66,11 +75,11 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
       console.error(err);
       let msg = "حدث خطأ ما، يرجى المحاولة مرة أخرى";
       if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        msg = "بيانات الدخول غير صحيحة";
+        msg = "بيانات الدخول غير صحيحة. تأكد من البريد وكلمة المرور.";
       } else if (err.code === 'auth/email-already-in-use') {
-        msg = "هذا البريد الإلكتروني مستخدم بالفعل";
+        msg = "هذا البريد الإلكتروني مستخدم بالفعل، جرب تسجيل الدخول.";
       } else if (err.code === 'auth/weak-password') {
-        msg = "كلمة المرور يجب أن تكون 6 أحرف على الأقل";
+        msg = "كلمة المرور يجب أن تكون 6 أحرف على الأقل للأمان.";
       } else if (err.message) {
         msg = err.message;
       }
@@ -80,10 +89,32 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
     }
   };
 
+  if (linkSent) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-pop-in">
+        <div className="bg-white rounded-[2.5rem] shadow-2xl p-8 max-w-md w-full border-4 border-indigo-50 text-center">
+            <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6">
+                <CheckCircle2 size={48} />
+            </div>
+            <h2 className="text-2xl font-black text-slate-800 mb-4">تم إرسال الرابط!</h2>
+            <p className="text-slate-600 leading-relaxed mb-8">
+                لقد أرسلنا رابط تسجيل دخول آمن إلى <strong>{email}</strong>.
+                يرجى فتح بريدك الإلكتروني والضغط على الرابط لتسجيل الدخول مباشرة.
+            </p>
+            <button 
+                onClick={() => setLinkSent(false)}
+                className="text-indigo-600 font-bold hover:underline"
+            >
+                العودة للخلف
+            </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-pop-in">
       <div className="bg-white rounded-[2.5rem] shadow-2xl p-8 max-w-md w-full border-4 border-indigo-50 relative overflow-hidden">
-        {/* Decorative Top Bar */}
         <div className={`absolute top-0 left-0 w-full h-2 bg-gradient-to-r ${mode === 'teacher' ? 'from-purple-500 via-fuchsia-500 to-pink-500' : 'from-indigo-500 via-blue-500 to-cyan-500'}`}></div>
         
         <div className="text-center mb-6">
@@ -94,11 +125,10 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
              {mode === 'teacher' ? 'بوابة المعلم' : 'العبقري الصغير'}
           </h2>
           <p className="text-slate-500 mt-2 font-medium">
-            {mode === 'login' ? 'سجل دخولك لمتابعة تقدمك' : mode === 'signup' ? 'أنشئ حساباً جديداً لتبدأ رحلتك' : 'ادخل بريدك الإلكتروني للتحقق'}
+            {mode === 'login' ? 'سجل دخولك لمتابعة تقدمك' : mode === 'signup' ? 'أنشئ حساباً جديداً لتبدأ رحلتك' : 'سجل دخولك كمعلم عبر البريد'}
           </p>
         </div>
 
-        {/* Tabs */}
         <div className="flex bg-slate-100 p-1 rounded-2xl mb-8">
             <button 
                 onClick={() => setMode('login')}
@@ -123,7 +153,6 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
         <form onSubmit={handleSubmit} className="space-y-5">
           {mode === 'signup' && (
             <>
-                {/* Full Name Input for Student Signup */}
                 <div>
                   <label className="block text-slate-700 font-bold mb-2 pr-1 text-sm">الاسم بالكامل (بالعربية)</label>
                   <div className="relative">
@@ -134,12 +163,12 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
                       onChange={(e) => setDisplayName(e.target.value)}
                       placeholder="مثال: سارة محمد"
                       className="w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 focus:bg-white outline-none transition-all pr-12 bg-slate-50 font-bold"
+                      disabled={isFetchingTeachers || (mode === 'signup' && teachers.length === 0)}
                     />
                     <User className="absolute right-4 top-4 text-slate-400" size={20} />
                   </div>
                 </div>
 
-                {/* Teacher Selection */}
                 <div>
                   <label className="block text-slate-700 font-bold mb-2 pr-1 text-sm">اختر معلمك</label>
                   <div className="relative group">
@@ -147,29 +176,21 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
                       required
                       value={teacherId}
                       onChange={(e) => setTeacherId(e.target.value)}
-                      className="w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 focus:bg-white outline-none transition-all pr-12 bg-slate-50 font-bold appearance-none cursor-pointer"
-                      disabled={isFetchingTeachers}
+                      className="w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 focus:bg-white outline-none transition-all pr-12 bg-slate-50 font-bold appearance-none cursor-pointer disabled:bg-slate-200"
+                      disabled={isFetchingTeachers || teachers.length === 0}
                     >
-                      <option value="">-- اضغط لاختيار المعلم --</option>
+                      <option value="">{isFetchingTeachers ? 'جاري التحميل...' : (teachers.length === 0 ? '-- لا يوجد معلمين --' : '-- اضغط لاختيار المعلم --')}</option>
                       {teachers.map(t => (
                           <option key={t.teacherId} value={t.teacherId}>{t.displayName}</option>
                       ))}
                     </select>
                     <UserCheck className="absolute right-4 top-4 text-slate-400 pointer-events-none" size={20} />
                     <ChevronDown className="absolute left-4 top-4 text-slate-400 pointer-events-none" size={20} />
-                    {isFetchingTeachers && <Loader2 className="absolute left-10 top-4 animate-spin text-indigo-500" size={18} />}
                   </div>
-                  {teacherId && (
-                      <div className="mt-3 bg-amber-50 border border-amber-100 p-3 rounded-2xl text-[11px] text-amber-800 font-black flex items-start gap-2">
-                          <AlertCircle size={16} className="shrink-0 text-amber-600" />
-                          <span>تنبيه: لا يمكن تغيير المعلم لاحقاً.</span>
-                      </div>
-                  )}
                 </div>
             </>
           )}
 
-          {/* Email Input (Common for all modes) */}
           <div>
             <label className="block text-slate-700 font-bold mb-2 pr-1 text-sm">البريد الإلكتروني</label>
             <div className="relative">
@@ -180,13 +201,12 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="name@example.com"
-                className={`w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 focus:ring-4 outline-none transition-all pr-12 bg-slate-50 text-right font-medium ${mode === 'teacher' ? 'focus:border-purple-500 focus:ring-purple-50' : 'focus:border-indigo-500 focus:ring-indigo-50'}`}
+                className={`w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 outline-none transition-all pr-12 bg-slate-50 text-right font-medium ${mode === 'teacher' ? 'focus:border-purple-500 focus:ring-purple-50' : 'focus:border-indigo-500 focus:ring-indigo-50'}`}
               />
               <Mail className="absolute right-4 top-4 text-slate-400" size={20} />
             </div>
           </div>
 
-          {/* Password Input (Hidden for Teacher Email-only login) */}
           {mode !== 'teacher' && (
             <div>
               <label className="block text-slate-700 font-bold mb-2 pr-1 text-sm">كلمة المرور</label>
@@ -206,21 +226,21 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
           )}
 
           {error && (
-            <div className="bg-red-50 text-red-600 p-4 rounded-2xl text-sm font-black flex items-start gap-2 animate-shake border border-red-100">
+            <div className="bg-red-50 text-red-600 p-4 rounded-2xl text-sm font-black flex items-start gap-2 border border-red-100 shadow-sm">
               <AlertCircle size={20} className="shrink-0" />
-              <span>{error}</span>
+              <span className="leading-relaxed">{error}</span>
             </div>
           )}
 
           <button 
             type="submit"
-            disabled={isLoading || (mode === 'signup' && isFetchingTeachers)}
-            className={`w-full text-white font-black py-4 rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2 mt-4 disabled:opacity-70 active:scale-95 ${mode === 'teacher' ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-200' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'}`}
+            disabled={isLoading || (mode === 'signup' && (isFetchingTeachers || teachers.length === 0))}
+            className={`w-full text-white font-black py-4 rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2 mt-4 disabled:opacity-70 ${mode === 'teacher' ? 'bg-purple-600 hover:bg-purple-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
           >
             {isLoading ? (
               <Loader2 className="animate-spin" size={24} />
             ) : mode === 'teacher' ? (
-              <>تحقق ودخول <GraduationCap size={20} /></>
+              <>إرسال رابط الدخول <Mail size={20} /></>
             ) : mode === 'login' ? (
               <>دخول الطالب <LogIn size={20} className="rotate-180" /></>
             ) : (
@@ -231,4 +251,6 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
       </div>
     </div>
   );
-}; export default UserEntryModal;
+};
+
+export default UserEntryModal;

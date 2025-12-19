@@ -1,7 +1,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { Home, TrendingUp, Calendar, Award, CheckCircle2, Percent, Loader2, RefreshCw, Trophy, UserCog } from 'lucide-react';
-import { loadStats, getLast7DaysStats, subscribeToLeaderboard } from '../services/statsService';
+// Fix: Renamed getLast7DaysStats to getLast7DaysStatsValue to match the export in statsService.ts
+import { loadStats, getLast7DaysStatsValue, subscribeToLeaderboard } from '../services/statsService';
 import { UserStats, LeaderboardEntry, UserRole, TeacherProfile } from '../types';
 
 interface AnalyticsScreenProps {
@@ -60,7 +61,8 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
     ? Math.round((totalCorrect / totalAttempts) * 100) 
     : 0;
 
-  const weeklyData = studentData ? getLast7DaysStats(studentData) : [];
+  // Fix: Updated call to getLast7DaysStatsValue to match exported function name
+  const weeklyData = studentData ? getLast7DaysStatsValue(studentData) : [];
   const maxWeeklyValue = Math.max(...weeklyData.map(d => d.correct + d.incorrect), 5);
 
   return (

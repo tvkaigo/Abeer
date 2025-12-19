@@ -1,7 +1,8 @@
+
 import React, { useEffect, useState } from 'react';
-import { Home, Trophy, Medal, Crown, Sparkles, Loader2, Globe2, TrendingUp, CloudOff, Award, UserCheck, Users } from 'lucide-react';
-import { subscribeToLeaderboard, getBadgeDefinitions, isCloudEnabled, loadStats } from '../services/statsService';
-import { LeaderboardEntry, UserRole, UserStats } from '../types';
+import { Home, Trophy, Medal, Crown, Sparkles, Loader2, Globe2, TrendingUp, CloudOff, Award, UserCheck, Users, AlertCircle } from 'lucide-react';
+import { subscribeToLeaderboard, getBadgeDefinitions, isCloudEnabledValue, loadStats } from '../services/statsService';
+import { LeaderboardEntry, UserRole, UserStats, TeacherProfile } from '../types';
 
 interface LeaderboardScreenProps {
   onBack: () => void;
@@ -11,34 +12,61 @@ interface LeaderboardScreenProps {
 const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUser }) => {
   const [leaders, setLeaders] = useState<LeaderboardEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isResolvingContext, setIsResolvingContext] = useState(true);
   const [offline, setOffline] = useState(false);
-  const [teacherId, setTeacherId] = useState<string | undefined>(undefined);
+  const [teacherId, setTeacherId] = useState<string | null>(null);
+  const [teacherName, setTeacherName] = useState<string>('');
 
   useEffect(() => {
-    // If we have a current user, fetch their teacherId to filter results
-    const checkUserRole = async () => {
-        if (currentUser) {
+    const checkUserContext = async () => {
+        if (!currentUser) {
+            setIsResolvingContext(false);
+            setIsLoading(false);
+            return;
+        }
+
+        try {
             const data = await loadStats(currentUser);
-            if (data && data.role === UserRole.STUDENT) {
-                setTeacherId((data as UserStats).teacherId);
-            } else if (data && data.role === UserRole.TEACHER) {
-                setTeacherId(currentUser); // Teachers see their own students
+            if (data) {
+                if (data.role === UserRole.STUDENT) {
+                    const student = data as UserStats;
+                    const tid = student.teacherId || 'none';
+                    setTeacherId(tid);
+                    if (tid !== 'none') {
+                        const tData = await loadStats(tid);
+                        if (tData) setTeacherName(tData.displayName);
+                    }
+                } else if (data.role === UserRole.TEACHER) {
+                    setTeacherId(currentUser);
+                    setTeacherName(data.displayName);
+                }
             }
+        } catch (err) {
+            console.error("Leaderboard context error:", err);
+        } finally {
+            setIsResolvingContext(false);
         }
     };
     
-    checkUserRole();
+    checkUserContext();
   }, [currentUser]);
 
   useEffect(() => {
+    if (isResolvingContext || teacherId === null) return;
+    if (teacherId === 'none') {
+        setLeaders([]);
+        setIsLoading(false);
+        return;
+    }
+
     const unsubscribe = subscribeToLeaderboard((data) => {
       setLeaders(data);
       setIsLoading(false);
-      setOffline(!isCloudEnabled());
+      setOffline(!isCloudEnabledValue());
     }, teacherId);
     
     return () => unsubscribe();
-  }, [teacherId]);
+  }, [teacherId, isResolvingContext]);
 
   const getRankIcon = (index: number) => {
     switch (index) {
@@ -122,20 +150,26 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
     );
   };
 
+  if (isResolvingContext) {
+    return (
+        <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 gap-4">
+            <Loader2 size={48} className="text-indigo-600 animate-spin" />
+            <p className="text-indigo-900 font-bold">جاري تحديد بيانات الفصل...</p>
+        </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center p-4 sm:p-8 overflow-y-auto font-sans">
       <div className="w-full max-w-4xl">
-        
-        {/* Header */}
         <div className="flex items-center justify-between mb-12">
           <button onClick={onBack} className="bg-white p-4 rounded-3xl shadow-sm text-gray-400 hover:text-indigo-600 hover:shadow-md transition-all active:scale-90">
             <Home size={24} />
           </button>
-          
           <div className="text-center">
             <h1 className="text-3xl sm:text-5xl font-black text-slate-800 flex items-center justify-center gap-3">
               <div className="bg-indigo-600 p-3 rounded-2xl text-white shadow-xl -rotate-2"><Trophy size={32} /></div>
-              لوحة الأبطال
+              أبطال فصلي
             </h1>
             <div className="mt-4 flex flex-col items-center justify-center gap-3">
                 <div className="flex items-center gap-3">
@@ -143,15 +177,14 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                         {offline ? <CloudOff size={12} /> : <Globe2 size={12} className="animate-spin-slow" />}
                         {offline ? 'الوضع المحلي' : 'مزامنة حية'}
                     </div>
-                    {teacherId && (
-                        <div className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-indigo-50 text-indigo-600 border border-indigo-100">
-                            <Users size={12} /> قائمة فصلي فقط
+                    {teacherName && (
+                        <div className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-indigo-600 text-white border-2 border-white shadow-sm">
+                            <Users size={12} /> فصل: {teacherName}
                         </div>
                     )}
                 </div>
             </div>
           </div>
-          
           <div className="w-14 h-14 hidden sm:block"></div>
         </div>
 
@@ -162,9 +195,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
           </div>
         ) : (
           <div className="animate-fade-in">
-            <Podium />
-
-            {/* List */}
+            {leaders.length > 0 ? <Podium /> : null}
             <div className="space-y-4 mb-24 px-2">
               <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 uppercase px-8 mb-2 tracking-widest">
                   <span>الترتيب والاسم</span>
@@ -177,7 +208,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
               {leaders.length === 0 ? (
                 <div className="text-center p-20 bg-white rounded-[3rem] border-2 border-dashed border-slate-200 text-slate-400">
                     <Trophy size={64} className="mx-auto mb-4 opacity-10" />
-                    <p className="font-bold text-lg">لم ينضم أحد للمنافسة بعد!</p>
+                    <p className="font-bold text-lg">لم ينضم أحد للمنافسة في هذا الفصل بعد!</p>
                 </div>
               ) : (
                 leaders.map((player, index) => {
@@ -193,14 +224,11 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                             : 'bg-white border-white text-slate-700 shadow-sm hover:shadow-xl hover:border-indigo-100'
                         }`}
                     >
-                      {/* Rank */}
                       <div className="w-12 h-12 flex items-center justify-center flex-shrink-0">
                         {getRankIcon(index)}
                       </div>
-
-                      {/* Info */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
+                      <div className="flex-1 min-w-0 text-right">
+                        <div className="flex items-center gap-2 justify-start">
                           <h3 className={`font-black text-lg truncate ${isCurrentUser ? 'text-white' : 'text-slate-800'}`}>
                             {player.displayName}
                           </h3>
@@ -209,42 +237,20 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                                 <UserCheck size={10} /> معلم
                             </span>
                           )}
-                          {isCurrentUser && (
-                            <span className="bg-white/20 text-white text-[9px] px-2 py-0.5 rounded-full font-bold border border-white/30 uppercase">أنت</span>
-                          )}
-                        </div>
-                        <div className={`text-[10px] font-bold flex items-center gap-1.5 mt-1 ${isCurrentUser ? 'text-indigo-200' : 'text-slate-400'}`}>
-                          <TrendingUp size={12} /> آخر جولة: {player.lastActive}
                         </div>
                       </div>
-
-                      {/* Awards / Badges */}
                       <div className="hidden md:flex gap-1.5 px-6 border-x border-slate-100/10">
                         {badges.length > 0 ? (
                             badges.slice(0, 4).map(b => (
-                                <div 
-                                    key={b.id} 
-                                    className="text-2xl hover:scale-125 transition-transform cursor-help" 
-                                    title={b.name}
-                                >
-                                    {b.icon}
-                                </div>
+                                <div key={b.id} className="text-2xl hover:scale-125 transition-transform cursor-help" title={b.name}>{b.icon}</div>
                             ))
                         ) : (
-                            <div className="text-[10px] text-slate-300 font-bold flex items-center gap-1">
-                                <Award size={14} className="opacity-30" /> لا جوائز بعد
-                            </div>
+                            <div className="text-[10px] text-slate-300 font-bold flex items-center gap-1"><Award size={14} className="opacity-30" /> لا جوائز</div>
                         )}
                       </div>
-
-                      {/* Score */}
-                      <div className="text-right min-w-[70px] sm:min-w-[90px]">
-                        <div className={`text-2xl sm:text-3xl font-black leading-none ${isCurrentUser ? 'text-white' : 'text-indigo-600'}`}>
-                          {player.totalCorrect}
-                        </div>
-                        <div className={`text-[9px] font-black uppercase mt-1 tracking-tighter ${isCurrentUser ? 'text-indigo-200' : 'text-slate-300'}`}>
-                            إجابة صحيحة
-                        </div>
+                      <div className="text-left min-w-[70px] sm:min-w-[90px]">
+                        <div className={`text-2xl sm:text-3xl font-black leading-none ${isCurrentUser ? 'text-white' : 'text-indigo-600'}`}>{player.totalCorrect}</div>
+                        <div className={`text-[9px] font-black uppercase mt-1 tracking-tighter ${isCurrentUser ? 'text-indigo-200' : 'text-slate-300'}`}>إجابة صحيحة</div>
                       </div>
                     </div>
                   );

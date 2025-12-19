@@ -1,9 +1,11 @@
+
 import { initializeApp, getApp, getApps } from 'firebase/app';
 import { 
   getFirestore, 
   doc, 
   getDoc, 
   setDoc, 
+  updateDoc,
   collection, 
   query, 
   orderBy, 
@@ -11,11 +13,12 @@ import {
   onSnapshot,
   where,
   getDocs,
-  limit
+  limit,
+  serverTimestamp
 } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
+import { getAuth, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink, User } from 'firebase/auth';
 import { getAnalytics, isSupported } from 'firebase/analytics';
-import { UserStats, GameResult, LeaderboardEntry, Badge, UserRole, TeacherProfile } from '../types';
+import { UserStats, GameResult, LeaderboardEntry, Badge, UserRole, TeacherProfile, DailyStat } from '../types';
 
 const firebaseConfig = {
   apiKey: "AIzaSyAtPiYQgil6zH5TEWx5LsOmNxAAQkuyIIY",
@@ -37,9 +40,13 @@ isSupported().then(supported => {
   }
 });
 
-// المسارات المطلوبة بدقة
 const USERS_COLLECTION = 'users';
 const TEACHERS_COLLECTION = 'Teachers';
+
+const actionCodeSettings = {
+  url: window.location.origin,
+  handleCodeInApp: true,
+};
 
 const getLocalDateString = (date: Date = new Date()): string => {
   const year = date.getFullYear();
@@ -48,6 +55,38 @@ const getLocalDateString = (date: Date = new Date()): string => {
   return `${year}-${month}-${day}`;
 };
 
+export const sendTeacherSignInLink = async (email: string) => {
+  const cleanEmail = email.trim().toLowerCase();
+  const q = query(collection(db, TEACHERS_COLLECTION), where("email", "==", cleanEmail), where("active", "==", true));
+  const snapshot = await getDocs(q);
+  if (snapshot.empty) {
+    throw new Error("عذراً، هذا البريد غير مصرح له بالدخول كمعلم أو الحساب غير نشط.");
+  }
+  await sendSignInLinkToEmail(auth, cleanEmail, actionCodeSettings);
+  window.localStorage.setItem('emailForSignIn', cleanEmail);
+};
+
+export const completeSignInWithLink = async (): Promise<User> => {
+  if (!isSignInWithEmailLink(auth, window.location.href)) throw new Error("الرابط غير صالح.");
+  let email = window.localStorage.getItem('emailForSignIn');
+  if (!email) email = window.prompt('يرجى إدخال بريدك الإلكتروني للتأكيد:');
+  if (!email) throw new Error("البريد الإلكتروني مطلوب.");
+
+  const result = await signInWithEmailLink(auth, email, window.location.href);
+  window.localStorage.removeItem('emailForSignIn');
+
+  if (result.user) {
+    const q = query(collection(db, TEACHERS_COLLECTION), where("email", "==", email.toLowerCase()));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      await updateDoc(snap.docs[0].ref, { uid: result.user.uid, lastLogin: serverTimestamp() });
+    }
+  }
+  return result.user;
+};
+
+export const checkIsSignInLink = () => isSignInWithEmailLink(auth, window.location.href);
+
 export const getBadgeDefinitions = (totalCorrect: number): Badge[] => [
   { id: 1, name: 'مبتدئ', required: 50, icon: '🌱', unlocked: totalCorrect >= 50, color: 'text-green-600 bg-green-100 border-green-200' },
   { id: 2, name: 'عبقري', required: 100, icon: '🧠', unlocked: totalCorrect >= 100, color: 'text-blue-600 bg-blue-100 border-blue-200' },
@@ -55,310 +94,96 @@ export const getBadgeDefinitions = (totalCorrect: number): Badge[] => [
   { id: 4, name: 'الأسطورة', required: 300, icon: '🏆', unlocked: totalCorrect >= 300, color: 'text-yellow-600 bg-yellow-100 border-yellow-200' },
 ];
 
-export const getInitialStats = (uid: string, email: string, displayName: string, teacherId?: string): UserStats => {
-  return {
-    uid,
-    email,
-    displayName: displayName || 'لاعب جديد',
-    role: UserRole.STUDENT,
-    teacherId: teacherId || '',
-    totalCorrect: 0,
-    totalIncorrect: 0,
-    streak: 0,
-    lastPlayedDate: null,
-    lastActive: new Date().toISOString(),
-    dailyHistory: {},
-    badges: getBadgeDefinitions(0),
-    badgesCount: 0
-  };
-};
-
-/**
- * جلب بيانات المستخدم (طالب أو معلم) عند تسجيل الدخول
- */
 export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile | null> => {
   if (!uid) return null;
-  try {
-    // 1. التحقق من مجموعة الطلاب
-    const studentRef = doc(db, USERS_COLLECTION, uid);
-    const studentSnap = await getDoc(studentRef);
-    if (studentSnap.exists()) {
-      const data = studentSnap.data();
-      const totalCorrect = Number(data.totalCorrect) || 0;
-      const badges = getBadgeDefinitions(totalCorrect);
-      return {
-        ...data,
-        uid: studentSnap.id,
-        badges,
-        badgesCount: badges.filter(b => b.unlocked).length
-      } as UserStats;
-    }
-
-    // 2. التحقق من مجموعة المعلمين
-    const teacherRef = doc(db, TEACHERS_COLLECTION, uid);
-    const teacherSnap = await getDoc(teacherRef);
-    if (teacherSnap.exists()) {
-      const data = teacherSnap.data();
-      return {
-        ...data,
-        teacherId: teacherSnap.id,
-        role: UserRole.TEACHER,
-        email: data.email || '',
-        displayName: data.displayName || 'معلم'
-      } as TeacherProfile;
-    }
-
-    return null;
-  } catch (err: any) {
-    console.error("MathGenius: Error loading stats", err);
-    return null;
+  const studentRef = doc(db, USERS_COLLECTION, uid);
+  const studentSnap = await getDoc(studentRef);
+  if (studentSnap.exists()) {
+    const data = studentSnap.data() as UserStats;
+    return { ...data, uid: studentSnap.id, badges: getBadgeDefinitions(data.totalCorrect || 0) };
   }
+  const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
+  const tSnap = await getDocs(q);
+  if (!tSnap.empty) {
+    const data = tSnap.docs[0].data();
+    return { ...data, teacherId: tSnap.docs[0].id, role: UserRole.TEACHER } as TeacherProfile;
+  }
+  return null;
 };
 
-/**
- * التحقق من المعلم عن طريق البريد الإلكتروني (للدخول السريع)
- */
-export const verifyTeacherByEmail = async (email: string): Promise<TeacherProfile | null> => {
-  try {
-    const q = query(collection(db, TEACHERS_COLLECTION), where("email", "==", email.trim()), limit(1));
-    const querySnapshot = await getDocs(q);
-    if (!querySnapshot.empty) {
-      const docData = querySnapshot.docs[0];
-      const data = docData.data();
-      return {
-        ...data,
-        teacherId: docData.id,
-        role: UserRole.TEACHER,
-        displayName: data.displayName || 'معلم'
-      } as TeacherProfile;
-    }
-    return null;
-  } catch (err) {
-    console.error("Error verifying teacher:", err);
-    return null;
-  }
-};
-
-/**
- * جلب معلومات معلم محدد لعرضها للطالب في الشاشة الرئيسية
- * يتم الجلب من المسار /Teachers/{teacherId}
- */
 export const fetchTeacherInfo = async (teacherId: string): Promise<TeacherProfile | null> => {
   if (!teacherId) return null;
-  try {
-    const docRef = doc(db, TEACHERS_COLLECTION, teacherId);
-    const docSnap = await getDoc(docRef);
-    if (docSnap.exists()) {
-      const data = docSnap.data();
-      return { 
-        ...data, 
-        teacherId: docSnap.id,
-        role: UserRole.TEACHER,
-        displayName: data.displayName || 'معلم غير معروف'
-      } as TeacherProfile;
-    }
-    return null;
-  } catch (err) {
-    console.error("Error fetching teacher info:", err);
-    return null;
-  }
+  const docRef = doc(db, TEACHERS_COLLECTION, teacherId);
+  const docSnap = await getDoc(docRef);
+  if (docSnap.exists()) return { ...docSnap.data(), teacherId: docSnap.id, role: UserRole.TEACHER } as TeacherProfile;
+  return null;
 };
 
-/**
- * جلب جميع المعلمين لعرضهم في قائمة الاختيار عند تسجيل طالب جديد
- */
 export const fetchAllTeachers = async (): Promise<TeacherProfile[]> => {
-  try {
-    const teachersCol = collection(db, TEACHERS_COLLECTION);
-    const snapshot = await getDocs(teachersCol);
-    return snapshot.docs.map(doc => {
-      const data = doc.data();
-      return {
-        teacherId: doc.id,
-        email: data.email || '',
-        displayName: data.displayName || 'معلم غير معروف',
-        role: UserRole.TEACHER
-      };
-    }) as TeacherProfile[];
-  } catch (err) {
-    console.error("Error fetching all teachers:", err);
-    return [];
-  }
+  const q = query(collection(db, TEACHERS_COLLECTION), where("active", "==", true));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(doc => ({ ...doc.data(), teacherId: doc.id })) as any;
 };
 
-export const subscribeToUserStats = (uid: string, callback: (stats: UserStats | TeacherProfile) => void) => {
-  if (!uid) return () => {};
-  
-  const studentUnsub = onSnapshot(doc(db, USERS_COLLECTION, uid), (docSnap) => {
+export const subscribeToUserStats = (uid: string, callback: (stats: any) => void) => {
+  return onSnapshot(doc(db, USERS_COLLECTION, uid), async (docSnap) => {
     if (docSnap.exists()) {
       const data = docSnap.data();
-      const totalCorrect = Number(data.totalCorrect) || 0;
-      const badges = getBadgeDefinitions(totalCorrect);
-      callback({
-        ...data,
-        uid: docSnap.id,
-        badges,
-        badgesCount: badges.filter(b => b.unlocked).length
-      } as UserStats);
-    }
-  });
-
-  const teacherUnsub = onSnapshot(doc(db, TEACHERS_COLLECTION, uid), (docSnap) => {
-    if (docSnap.exists()) {
-      const data = docSnap.data();
-      callback({
-        ...data,
-        teacherId: docSnap.id,
-        role: UserRole.TEACHER
-      } as TeacherProfile);
-    }
-  });
-
-  return () => {
-    studentUnsub();
-    teacherUnsub();
-  };
-};
-
-export const createOrUpdatePlayerProfile = async (uid: string, email: string, displayName: string, teacherId?: string): Promise<void> => {
-  if (!uid) return;
-  try {
-    // التحقق أولاً إذا كان المستخدم معلماً (باستخدام UID الخاص به)
-    const teacherRef = doc(db, TEACHERS_COLLECTION, uid);
-    const teacherSnap = await getDoc(teacherRef);
-    
-    if (teacherSnap.exists()) {
-        await setDoc(teacherRef, { 
-            email, 
-            displayName: displayName || teacherSnap.data().displayName,
-            lastActive: new Date().toISOString()
-        }, { merge: true });
-        return;
-    }
-
-    // إذا لم يكن معلماً، نتعامل معه كطالب
-    const studentRef = doc(db, USERS_COLLECTION, uid);
-    const studentSnap = await getDoc(studentRef);
-    
-    if (!studentSnap.exists()) {
-      const initial = getInitialStats(uid, email, displayName, teacherId);
-      await setDoc(studentRef, initial);
+      callback({ ...data, uid: docSnap.id, badges: getBadgeDefinitions(data.totalCorrect || 0) });
     } else {
-      const updatePayload: any = { 
-        email,
-        uid,
-        lastActive: new Date().toISOString()
-      };
-      if (displayName && displayName.trim() !== '' && displayName !== 'لاعب') {
-          updatePayload.displayName = displayName;
-      }
-      if (teacherId) {
-          updatePayload.teacherId = teacherId;
-      }
-      await setDoc(studentRef, updatePayload, { merge: true });
+        const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
+        const tSnap = await getDocs(q);
+        if (!tSnap.empty) callback({ ...tSnap.docs[0].data(), teacherId: tSnap.docs[0].id, role: UserRole.TEACHER });
     }
-  } catch (err: any) {
-    console.error("MathGenius: Failed to sync profile", err.message);
-  }
+  });
 };
 
-export const updateUserStats = async (result: GameResult, uid: string): Promise<UserStats | null> => {
-  const today = getLocalDateString();
-  const yesterdayDate = new Date();
-  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-  const yesterday = getLocalDateString(yesterdayDate);
-  
-  const currentData = await loadStats(uid);
-  if (!currentData || currentData.role !== UserRole.STUDENT) return null;
-  
-  const baseStats = currentData as UserStats;
+export const createOrUpdatePlayerProfile = async (uid: string, email: string, displayName: string, teacherId?: string) => {
+    const studentRef = doc(db, USERS_COLLECTION, uid);
+    const snap = await getDoc(studentRef);
+    if (!snap.exists()) {
+        await setDoc(studentRef, {
+            uid, email, displayName, role: UserRole.STUDENT, teacherId, totalCorrect: 0, totalIncorrect: 0, streak: 0, lastActive: new Date().toISOString(), dailyHistory: {}
+        });
+    }
+};
 
-  let newStreak = baseStats.streak || 0;
-  if (baseStats.lastPlayedDate !== today) {
-    newStreak = baseStats.lastPlayedDate === yesterday ? (baseStats.streak || 0) + 1 : 1;
-  }
+export const updateUserStats = async (result: GameResult, uid: string) => {
+    const today = getLocalDateString();
+    const userRef = doc(db, USERS_COLLECTION, uid);
+    const snap = await getDoc(userRef);
+    if (!snap.exists()) return;
+    
+    const data = snap.data();
+    const dailyHistory = data.dailyHistory || {};
+    const todayStats = dailyHistory[today] || { date: today, correct: 0, incorrect: 0 };
+    
+    todayStats.correct += result.score;
+    todayStats.incorrect += (result.totalQuestions - result.score);
 
-  const addedCorrect = result.score;
-  const addedIncorrect = result.totalQuestions - result.score;
-  const newTotalCorrect = (baseStats.totalCorrect || 0) + addedCorrect;
-  
-  const historyKey = `dailyHistory.${today}`;
-  const dailyUpdate = {
-    date: today,
-    correct: (baseStats.dailyHistory?.[today]?.correct || 0) + addedCorrect,
-    incorrect: (baseStats.dailyHistory?.[today]?.incorrect || 0) + addedIncorrect
-  };
-
-  const currentBadges = getBadgeDefinitions(newTotalCorrect);
-  const newBadgesCount = currentBadges.filter(b => b.unlocked).length;
-  const nowIso = new Date().toISOString();
-
-  const cloudPayload: any = {
-    totalCorrect: increment(addedCorrect),
-    totalIncorrect: increment(addedIncorrect),
-    lastPlayedDate: today,
-    lastActive: nowIso,
-    streak: newStreak,
-    [historyKey]: dailyUpdate,
-    badgesCount: newBadgesCount,
-    badges: currentBadges
-  };
-
-  try {
-    const userDocRef = doc(db, USERS_COLLECTION, uid);
-    await setDoc(userDocRef, cloudPayload, { merge: true });
-  } catch (err: any) {
-    console.error("MathGenius: Failed to update stats in Firebase", err.message);
-  }
-  
-  return {
-    ...baseStats,
-    totalCorrect: newTotalCorrect,
-    totalIncorrect: (baseStats.totalIncorrect || 0) + addedIncorrect,
-    streak: newStreak,
-    lastPlayedDate: today,
-    lastActive: nowIso,
-    dailyHistory: { ...baseStats.dailyHistory, [today]: dailyUpdate },
-    badges: currentBadges,
-    badgesCount: newBadgesCount
-  };
+    await updateDoc(userRef, {
+        totalCorrect: increment(result.score),
+        totalIncorrect: increment(result.totalQuestions - result.score),
+        lastActive: new Date().toISOString(),
+        lastPlayedDate: today,
+        [`dailyHistory.${today}`]: todayStats
+    });
 };
 
 export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => void, teacherId?: string) => {
-  let q;
-  if (teacherId) {
-    q = query(
-      collection(db, USERS_COLLECTION), 
-      where("teacherId", "==", teacherId),
-      orderBy("totalCorrect", "desc")
-    );
-  } else {
-    q = query(collection(db, USERS_COLLECTION), orderBy("totalCorrect", "desc"));
-  }
+  const q = teacherId && teacherId !== 'none' 
+    ? query(collection(db, USERS_COLLECTION), where("teacherId", "==", teacherId), orderBy("totalCorrect", "desc"))
+    : query(collection(db, USERS_COLLECTION), orderBy("totalCorrect", "desc"), limit(50));
 
   return onSnapshot(q, (snapshot) => {
-    const leaders: LeaderboardEntry[] = [];
-    snapshot.forEach((doc) => {
-      const data = doc.data();
-      leaders.push({
-        uid: doc.id,
-        displayName: data.displayName || 'لاعب مجهول',
-        role: data.role || UserRole.STUDENT,
-        totalCorrect: Number(data.totalCorrect) || 0,
-        badgesCount: Number(data.badgesCount) || 0,
-        lastActive: data.lastPlayedDate || 'جديد'
-      });
-    });
-    callback(leaders);
-  }, (err) => {
-      console.error("MathGenius: Leaderboard error", err);
-      callback([]);
+    const leaders = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() }));
+    callback(leaders as any);
   });
 };
 
-export const isCloudEnabled = () => true;
+export const isCloudEnabledValue = () => true;
 
-export const getLast7DaysStats = (stats: UserStats) => {
+export const getLast7DaysStatsValue = (stats: UserStats) => {
   const days = [];
   const today = new Date();
   for (let i = 6; i >= 0; i--) {
@@ -369,12 +194,7 @@ export const getLast7DaysStats = (stats: UserStats) => {
     const dayStat = stats.dailyHistory && stats.dailyHistory[dateStr] 
       ? stats.dailyHistory[dateStr] 
       : { correct: 0, incorrect: 0 };
-    days.push({ 
-      label, 
-      date: dateStr, 
-      correct: Number(dayStat.correct) || 0, 
-      incorrect: Number(dayStat.incorrect) || 0 
-    });
+    days.push({ label, date: dateStr, correct: dayStat.correct, incorrect: dayStat.incorrect });
   }
   return days;
 };
