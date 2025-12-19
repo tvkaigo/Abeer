@@ -1,4 +1,3 @@
-
 import { initializeApp, getApp, getApps } from 'firebase/app';
 import { 
   getFirestore, 
@@ -38,6 +37,7 @@ isSupported().then(supported => {
   }
 });
 
+// المسارات المطلوبة بدقة
 const USERS_COLLECTION = 'users';
 const TEACHERS_COLLECTION = 'Teachers';
 
@@ -73,9 +73,13 @@ export const getInitialStats = (uid: string, email: string, displayName: string,
   };
 };
 
+/**
+ * جلب بيانات المستخدم (طالب أو معلم) عند تسجيل الدخول
+ */
 export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile | null> => {
   if (!uid) return null;
   try {
+    // 1. التحقق من مجموعة الطلاب
     const studentRef = doc(db, USERS_COLLECTION, uid);
     const studentSnap = await getDoc(studentRef);
     if (studentSnap.exists()) {
@@ -90,13 +94,17 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
       } as UserStats;
     }
 
+    // 2. التحقق من مجموعة المعلمين
     const teacherRef = doc(db, TEACHERS_COLLECTION, uid);
     const teacherSnap = await getDoc(teacherRef);
     if (teacherSnap.exists()) {
+      const data = teacherSnap.data();
       return {
-        ...teacherSnap.data(),
+        ...data,
         teacherId: teacherSnap.id,
-        role: UserRole.TEACHER
+        role: UserRole.TEACHER,
+        email: data.email || '',
+        displayName: data.displayName || 'معلم'
       } as TeacherProfile;
     }
 
@@ -108,18 +116,20 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
 };
 
 /**
- * التحقق من المعلم عن طريق البريد الإلكتروني فقط (للدخول السريع للمعلمين)
+ * التحقق من المعلم عن طريق البريد الإلكتروني (للدخول السريع)
  */
 export const verifyTeacherByEmail = async (email: string): Promise<TeacherProfile | null> => {
   try {
-    const q = query(collection(db, TEACHERS_COLLECTION), where("email", "==", email), limit(1));
+    const q = query(collection(db, TEACHERS_COLLECTION), where("email", "==", email.trim()), limit(1));
     const querySnapshot = await getDocs(q);
     if (!querySnapshot.empty) {
       const docData = querySnapshot.docs[0];
+      const data = docData.data();
       return {
-        ...docData.data(),
+        ...data,
         teacherId: docData.id,
-        role: UserRole.TEACHER
+        role: UserRole.TEACHER,
+        displayName: data.displayName || 'معلم'
       } as TeacherProfile;
     }
     return null;
@@ -129,21 +139,34 @@ export const verifyTeacherByEmail = async (email: string): Promise<TeacherProfil
   }
 };
 
+/**
+ * جلب معلومات معلم محدد لعرضها للطالب في الشاشة الرئيسية
+ * يتم الجلب من المسار /Teachers/{teacherId}
+ */
 export const fetchTeacherInfo = async (teacherId: string): Promise<TeacherProfile | null> => {
   if (!teacherId) return null;
   try {
     const docRef = doc(db, TEACHERS_COLLECTION, teacherId);
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
-      return { ...docSnap.data(), teacherId: docSnap.id } as TeacherProfile;
+      const data = docSnap.data();
+      return { 
+        ...data, 
+        teacherId: docSnap.id,
+        role: UserRole.TEACHER,
+        displayName: data.displayName || 'معلم غير معروف'
+      } as TeacherProfile;
     }
     return null;
   } catch (err) {
-    console.error("Error fetching teacher:", err);
+    console.error("Error fetching teacher info:", err);
     return null;
   }
 };
 
+/**
+ * جلب جميع المعلمين لعرضهم في قائمة الاختيار عند تسجيل طالب جديد
+ */
 export const fetchAllTeachers = async (): Promise<TeacherProfile[]> => {
   try {
     const teachersCol = collection(db, TEACHERS_COLLECTION);
@@ -182,8 +205,9 @@ export const subscribeToUserStats = (uid: string, callback: (stats: UserStats | 
 
   const teacherUnsub = onSnapshot(doc(db, TEACHERS_COLLECTION, uid), (docSnap) => {
     if (docSnap.exists()) {
+      const data = docSnap.data();
       callback({
-        ...docSnap.data(),
+        ...data,
         teacherId: docSnap.id,
         role: UserRole.TEACHER
       } as TeacherProfile);
@@ -199,6 +223,7 @@ export const subscribeToUserStats = (uid: string, callback: (stats: UserStats | 
 export const createOrUpdatePlayerProfile = async (uid: string, email: string, displayName: string, teacherId?: string): Promise<void> => {
   if (!uid) return;
   try {
+    // التحقق أولاً إذا كان المستخدم معلماً (باستخدام UID الخاص به)
     const teacherRef = doc(db, TEACHERS_COLLECTION, uid);
     const teacherSnap = await getDoc(teacherRef);
     
@@ -211,6 +236,7 @@ export const createOrUpdatePlayerProfile = async (uid: string, email: string, di
         return;
     }
 
+    // إذا لم يكن معلماً، نتعامل معه كطالب
     const studentRef = doc(db, USERS_COLLECTION, uid);
     const studentSnap = await getDoc(studentRef);
     
