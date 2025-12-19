@@ -82,6 +82,8 @@ export interface TeacherProfile {
   email: string;
   displayName: string;
   role: UserRole.TEACHER;
+   active: boolean,
+    createdByAdmin: boolean
 }
 
 export interface LeaderboardEntry {
