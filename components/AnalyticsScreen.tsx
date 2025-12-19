@@ -1,15 +1,17 @@
 
 import React, { useEffect, useState } from 'react';
 import { Home, TrendingUp, Calendar, Award, CheckCircle2, Percent, Loader2, RefreshCw, Trophy, UserCog } from 'lucide-react';
+// Fix: Renamed getLast7DaysStats to getLast7DaysStatsValue to match the export in statsService.ts
 import { loadStats, getLast7DaysStatsValue, subscribeToLeaderboard } from '../services/statsService';
 import { UserStats, LeaderboardEntry, UserRole, TeacherProfile } from '../types';
 
 interface AnalyticsScreenProps {
   onBack: () => void;
-  userName?: string; // هذا هو الـ UID الخاص بالمستخدم الحالي
+  userName?: string; // This will now receive the UID
 }
 
 const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) => {
+  // Fix: Allow state to hold either UserStats or TeacherProfile to avoid type mismatch with loadStats
   const [player, setPlayer] = useState<UserStats | TeacherProfile | null>(null);
   const [rank, setRank] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -18,7 +20,6 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
     if (userName) {
       setIsLoading(true);
       try {
-        // الدالة loadStats المحدثة ستبحث في كلا المجموعتين Users و Teachers
         const userData = await loadStats(userName);
         setPlayer(userData);
       } catch (error) {
@@ -32,41 +33,36 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
   useEffect(() => {
     fetchData();
     
-    // الاشتراك في الترتيب إذا كان طالباً
-    if (userName) {
-      const unsub = subscribeToLeaderboard((leaders) => {
-          const userRank = leaders.findIndex(u => u.uid === userName) + 1;
-          setRank(userRank > 0 ? userRank : null);
-      });
-      return () => unsub();
-    }
+    // Subscribe to rank changes
+    const unsub = subscribeToLeaderboard((leaders) => {
+        const userRank = leaders.findIndex(u => u.uid === userName) + 1;
+        setRank(userRank > 0 ? userRank : null);
+    });
+    
+    return () => unsub();
   }, [userName]);
 
-  if (isLoading) return (
+  if (isLoading || !player) return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 gap-4">
       <Loader2 size={48} className="text-indigo-600 animate-spin" />
       <p className="text-gray-500 font-bold animate-pulse">جاري مزامنة بيانات البطل...</p>
     </div>
   );
 
-  if (!player) return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 gap-4 p-6 text-center">
-      <Trophy size={64} className="text-gray-300 mb-2" />
-      <h2 className="text-xl font-bold text-gray-700">عذراً، لم نتمكن من العثور على بياناتك</h2>
-      <p className="text-gray-500 max-w-xs">يرجى التأكد من تسجيل الدخول بشكل صحيح والمحاولة مرة أخرى.</p>
-      <button onClick={onBack} className="mt-4 bg-indigo-600 text-white px-8 py-3 rounded-2xl font-bold shadow-lg">العودة للرئيسية</button>
-    </div>
-  );
+  // Fix: Safely extract student-specific data using role checks
+  const isStudent = player.role === UserRole.STUDENT;
+  const studentData = isStudent ? (player as UserStats) : null;
 
-  const totalCorrect = player.totalCorrect ?? 0;
-  const totalIncorrect = player.totalIncorrect ?? 0;
-  const streak = player.streak ?? 0;
+  const totalCorrect = studentData?.totalCorrect ?? 0;
+  const totalIncorrect = studentData?.totalIncorrect ?? 0;
+  const streak = studentData?.streak ?? 0;
   const totalAttempts = totalCorrect + totalIncorrect;
   const accuracy = totalAttempts > 0 
     ? Math.round((totalCorrect / totalAttempts) * 100) 
     : 0;
 
-  const weeklyData = getLast7DaysStatsValue(player);
+  // Fix: Updated call to getLast7DaysStatsValue to match exported function name
+  const weeklyData = studentData ? getLast7DaysStatsValue(studentData) : [];
   const maxWeeklyValue = Math.max(...weeklyData.map(d => d.correct + d.incorrect), 5);
 
   return (
@@ -85,7 +81,7 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
           <div className="flex flex-col items-center text-center">
             <h1 className="text-2xl font-black text-slate-800 flex items-center gap-2">
               <TrendingUp className="text-indigo-600" />
-              ملف {player.role === UserRole.TEACHER ? 'المعلم' : 'اللاعب'}
+              ملف اللاعب
             </h1>
             <div className="flex items-center gap-2 mt-1">
                 <span className="text-indigo-500 font-bold bg-indigo-50 px-4 py-1 rounded-full text-sm truncate max-w-[200px]">
@@ -119,7 +115,7 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
             <div className="text-3xl font-black text-slate-800 z-10 flex items-baseline">
                 {rank ? <><span className="text-lg text-slate-400 mr-1">#</span>{rank}</> : '-'}
             </div>
-            <div className="text-xs text-slate-400 font-bold">الترتيب بالفصل</div>
+            <div className="text-xs text-slate-400 font-bold">ترتيبك الحالي</div>
           </div>
 
           <div className="bg-white p-4 rounded-3xl shadow-sm border border-green-100 flex flex-col items-center justify-center">
@@ -147,16 +143,16 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
           </div>
         </div>
 
-        {/* Weekly Chart */}
-        <div className="bg-white rounded-[2rem] shadow-lg shadow-indigo-500/5 p-6 mb-8 border border-white">
-          <div className="flex items-center gap-2 mb-6">
-            <div className="bg-indigo-100 p-2 rounded-lg text-indigo-600">
-               <TrendingUp size={20} />
+        {/* Weekly Chart - Only shown for students */}
+        {isStudent && (
+          <div className="bg-white rounded-[2rem] shadow-lg shadow-indigo-500/5 p-6 mb-8 border border-white">
+            <div className="flex items-center gap-2 mb-6">
+              <div className="bg-indigo-100 p-2 rounded-lg text-indigo-600">
+                 <TrendingUp size={20} />
+              </div>
+              <h2 className="text-lg font-bold text-slate-700">النشاط الأسبوعي</h2>
             </div>
-            <h2 className="text-lg font-bold text-slate-700">النشاط الأسبوعي</h2>
-          </div>
 
-          {weeklyData.length > 0 ? (
             <div className="flex items-end justify-between h-48 gap-3 px-2">
               {weeklyData.map((day, idx) => {
                 const total = day.correct + day.incorrect;
@@ -180,13 +176,11 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
                 );
               })}
             </div>
-          ) : (
-            <div className="text-center py-10 text-gray-400 font-bold">لا توجد بيانات مسجلة لهذا الأسبوع</div>
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* Badges Section */}
-        {player.badges && player.badges.length > 0 && (
+        {/* Badges Section - Only shown for students */}
+        {isStudent && studentData && (
           <div className="bg-white rounded-[2rem] shadow-lg shadow-indigo-500/5 p-6 border border-white">
             <div className="flex items-center gap-2 mb-6">
               <div className="bg-yellow-100 p-2 rounded-lg text-yellow-600">
@@ -196,8 +190,8 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {player.badges.map((badge) => {
-                 const progress = Math.min(100, (player.totalCorrect / badge.required) * 100);
+              {studentData.badges.map((badge) => {
+                 const progress = Math.min(100, (studentData.totalCorrect / badge.required) * 100);
                  return (
                   <div 
                     key={badge.id} 
@@ -210,7 +204,7 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
                     <div className="flex-1">
                       <h3 className="font-black text-lg">{badge.name}</h3>
                       <div className="text-xs font-medium mt-1 opacity-90">
-                        {badge.unlocked ? 'تم الحصول عليها!' : `باقي ${Math.max(0, badge.required - player.totalCorrect)} إجابة`}
+                        {badge.unlocked ? 'تم الحصول عليها!' : `باقي ${Math.max(0, badge.required - studentData.totalCorrect)} إجابة`}
                       </div>
                       {!badge.unlocked && (
                         <div className="mt-3 w-full h-2 bg-slate-200 rounded-full overflow-hidden">

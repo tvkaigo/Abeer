@@ -30,7 +30,6 @@ const firebaseConfig = {
   measurementId: "G-Z2SGMD4R79"
 };
 
-// تهيئة Firebase
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const db = getFirestore(app);
 export const auth = getAuth(app);
@@ -41,12 +40,12 @@ isSupported().then(supported => {
   }
 });
 
-// المسارات المطلوبة من قبل المستخدم
-const USERS_COLLECTION = 'Users'; 
+const USERS_COLLECTION = 'users';
 const TEACHERS_COLLECTION = 'Teachers';
 
+// جعل الرابط ديناميكياً ليعمل على أي نطاق (Vercel أو غيره)
 const actionCodeSettings = {
-  url: window.location.origin + '/finish-signin',
+  url: `${window.location.origin}/finish-signin`,
   handleCodeInApp: true
 };
 
@@ -57,25 +56,36 @@ const getLocalDateString = (date: Date = new Date()): string => {
   return `${year}-${month}-${day}`;
 };
 
+/**
+ * إرسال رابط تسجيل الدخول للمعلم بعد التحقق من وجوده في مجموعة Teachers
+ */
 export const sendTeacherSignInLink = async (email: string) => {
   const cleanEmail = email.trim().toLowerCase();
+  
+  // التحقق من وجود المعلم باستخدام البريد كمعرف للمستند (Document ID)
   const docRef = doc(db, TEACHERS_COLLECTION, cleanEmail);
   const snap = await getDoc(docRef);
 
-  if (!snap.exists() || snap.data()?.active !== true) {
+  if (!snap.exists()) {
     throw new Error("عذراً، هذا البريد غير مصرح له بالدخول كمعلم.");
   }
   
+  // إرسال الرابط
   await sendSignInLinkToEmail(auth, cleanEmail, actionCodeSettings);
+  // حفظ البريد محلياً لتسهيل عملية الدخول لاحقاً
   window.localStorage.setItem('emailForSignIn', cleanEmail);
 };
 
+/**
+ * إكمال تسجيل الدخول عبر الرابط وربط الـ UID بالسجل
+ */
 export const completeSignInWithLink = async (): Promise<User> => {
   if (!isSignInWithEmailLink(auth, window.location.href)) {
     throw new Error("الرابط غير صالح أو انتهت صلاحيته.");
   }
   
   let email = window.localStorage.getItem('emailForSignIn');
+  
   if (!email) {
     email = window.prompt('يرجى إدخال بريدك الإلكتروني للتأكيد:');
   }
@@ -94,7 +104,8 @@ export const completeSignInWithLink = async (): Promise<User> => {
       await updateDoc(teacherDocRef, { 
         uid: result.user.uid, 
         linkedAt: serverTimestamp(),
-        lastLogin: serverTimestamp()
+        lastLogin: serverTimestamp(),
+        active: true
       });
     }
   }
@@ -113,7 +124,6 @@ export const getBadgeDefinitions = (totalCorrect: number): Badge[] => [
 export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile | null> => {
   if (!uid) return null;
   
-  // البحث في الطلاب أولاً
   const studentRef = doc(db, USERS_COLLECTION, uid);
   const studentSnap = await getDoc(studentRef);
   if (studentSnap.exists()) {
@@ -121,31 +131,11 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
     return { ...data, uid: studentSnap.id, badges: getBadgeDefinitions(data.totalCorrect || 0) };
   }
   
-  // ثم البحث في المعلمين باستخدام الـ UID المخزن داخل الوثيقة
-  const teachersQuery = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
-  const tSnap = await getDocs(teachersQuery);
+  const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
+  const tSnap = await getDocs(q);
   if (!tSnap.empty) {
-    const teacherDoc = tSnap.docs[0];
-    const data = teacherDoc.data();
-    return { 
-      ...data, 
-      teacherId: teacherDoc.id, 
-      role: UserRole.TEACHER,
-      badges: getBadgeDefinitions(data.totalCorrect || 0)
-    } as TeacherProfile;
-  }
-  
-  // حالة المعلم الذي لم يتم ربط الـ UID به بعد (البحث بالإيميل إذا كان الـ uid هو الإيميل)
-  const teacherRef = doc(db, TEACHERS_COLLECTION, uid);
-  const teacherSnap = await getDoc(teacherRef);
-  if (teacherSnap.exists()) {
-     const data = teacherSnap.data();
-     return { 
-       ...data, 
-       teacherId: teacherSnap.id, 
-       role: UserRole.TEACHER,
-       badges: getBadgeDefinitions(data.totalCorrect || 0)
-     } as TeacherProfile;
+    const data = tSnap.docs[0].data();
+    return { ...data, teacherId: tSnap.docs[0].id, role: UserRole.TEACHER } as TeacherProfile;
   }
   
   return null;
@@ -155,30 +145,18 @@ export const fetchTeacherInfo = async (teacherId: string): Promise<TeacherProfil
   if (!teacherId) return null;
   const docRef = doc(db, TEACHERS_COLLECTION, teacherId);
   const docSnap = await getDoc(docRef);
-  if (docSnap.exists()) {
-    const data = docSnap.data();
-    return { 
-      ...data, 
-      teacherId: docSnap.id, 
-      role: UserRole.TEACHER,
-      badges: getBadgeDefinitions(data.totalCorrect || 0)
-    } as TeacherProfile;
-  }
+  if (docSnap.exists()) return { ...docSnap.data(), teacherId: docSnap.id, role: UserRole.TEACHER } as TeacherProfile;
   return null;
 };
 
 export const fetchAllTeachers = async (): Promise<TeacherProfile[]> => {
   const q = query(collection(db, TEACHERS_COLLECTION), where("active", "==", true));
   const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ 
-    ...doc.data(), 
-    teacherId: doc.id,
-    badges: getBadgeDefinitions(doc.data().totalCorrect || 0)
-  })) as any;
+  return snapshot.docs.map(doc => ({ ...doc.data(), teacherId: doc.id })) as any;
 };
 
 export const subscribeToUserStats = (uid: string, callback: (stats: any) => void) => {
-  const unsub = onSnapshot(doc(db, USERS_COLLECTION, uid), async (docSnap) => {
+  return onSnapshot(doc(db, USERS_COLLECTION, uid), async (docSnap) => {
     if (docSnap.exists()) {
       const data = docSnap.data();
       callback({ ...data, uid: docSnap.id, badges: getBadgeDefinitions(data.totalCorrect || 0) });
@@ -186,13 +164,11 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
         const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
         const tSnap = await getDocs(q);
         if (!tSnap.empty) {
-          const teacherDoc = tSnap.docs[0];
-          const data = teacherDoc.data();
-          callback({ ...data, teacherId: teacherDoc.id, role: UserRole.TEACHER, badges: getBadgeDefinitions(data.totalCorrect || 0) });
+          const data = tSnap.docs[0].data();
+          callback({ ...data, teacherId: tSnap.docs[0].id, role: UserRole.TEACHER });
         }
     }
   });
-  return unsub;
 };
 
 export const createOrUpdatePlayerProfile = async (uid: string, email: string, displayName: string, teacherId?: string) => {
@@ -209,31 +185,18 @@ export const createOrUpdatePlayerProfile = async (uid: string, email: string, di
 
 export const updateUserStats = async (result: GameResult, uid: string) => {
     const today = getLocalDateString();
-    
-    let targetRef = doc(db, USERS_COLLECTION, uid);
-    let snap = await getDoc(targetRef);
-    
-    if (!snap.exists()) {
-       const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
-       const tSnap = await getDocs(q);
-       if (!tSnap.empty) {
-          targetRef = doc(db, TEACHERS_COLLECTION, tSnap.docs[0].id);
-          snap = await getDoc(targetRef);
-       } else {
-         return;
-       }
-    }
+    const userRef = doc(db, USERS_COLLECTION, uid);
+    const snap = await getDoc(userRef);
+    if (!snap.exists()) return;
     
     const data = snap.data();
-    if (!data) return;
-
     const dailyHistory = data.dailyHistory || {};
     const todayStats = dailyHistory[today] || { date: today, correct: 0, incorrect: 0 };
     
     todayStats.correct += result.score;
     todayStats.incorrect += (result.totalQuestions - result.score);
 
-    await updateDoc(targetRef, {
+    await updateDoc(userRef, {
         totalCorrect: increment(result.score),
         totalIncorrect: increment(result.totalQuestions - result.score),
         lastActive: new Date().toISOString(),
@@ -269,7 +232,6 @@ export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => v
 export const isCloudEnabledValue = () => true;
 
 export const getLast7DaysStatsValue = (stats: any) => {
-  if (!stats || !stats.dailyHistory) return [];
   const days = [];
   const today = new Date();
   for (let i = 6; i >= 0; i--) {
@@ -277,7 +239,7 @@ export const getLast7DaysStatsValue = (stats: any) => {
     d.setDate(today.getDate() - i);
     const dateStr = getLocalDateString(d);
     const label = d.toLocaleDateString('ar-EG', { weekday: 'short' });
-    const dayStat = stats.dailyHistory[dateStr] 
+    const dayStat = stats.dailyHistory && stats.dailyHistory[dateStr] 
       ? stats.dailyHistory[dateStr] 
       : { correct: 0, incorrect: 0 };
     days.push({ label, date: dateStr, correct: dayStat.correct || 0, incorrect: dayStat.incorrect || 0 });
