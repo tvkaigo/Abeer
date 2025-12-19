@@ -1,3 +1,4 @@
+
 import { initializeApp, getApp, getApps } from 'firebase/app';
 import { 
   getFirestore, 
@@ -10,7 +11,8 @@ import {
   increment,
   onSnapshot,
   where,
-  getDocs
+  getDocs,
+  limit
 } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { getAnalytics, isSupported } from 'firebase/analytics';
@@ -36,7 +38,7 @@ isSupported().then(supported => {
   }
 });
 
-const USERS_COLLECTION = 'Users';
+const USERS_COLLECTION = 'users';
 const TEACHERS_COLLECTION = 'Teachers';
 
 const getLocalDateString = (date: Date = new Date()): string => {
@@ -105,6 +107,28 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
   }
 };
 
+/**
+ * التحقق من المعلم عن طريق البريد الإلكتروني فقط (للدخول السريع للمعلمين)
+ */
+export const verifyTeacherByEmail = async (email: string): Promise<TeacherProfile | null> => {
+  try {
+    const q = query(collection(db, TEACHERS_COLLECTION), where("email", "==", email), limit(1));
+    const querySnapshot = await getDocs(q);
+    if (!querySnapshot.empty) {
+      const docData = querySnapshot.docs[0];
+      return {
+        ...docData.data(),
+        teacherId: docData.id,
+        role: UserRole.TEACHER
+      } as TeacherProfile;
+    }
+    return null;
+  } catch (err) {
+    console.error("Error verifying teacher:", err);
+    return null;
+  }
+};
+
 export const fetchTeacherInfo = async (teacherId: string): Promise<TeacherProfile | null> => {
   if (!teacherId) return null;
   try {
@@ -124,11 +148,15 @@ export const fetchAllTeachers = async (): Promise<TeacherProfile[]> => {
   try {
     const teachersCol = collection(db, TEACHERS_COLLECTION);
     const snapshot = await getDocs(teachersCol);
-    return snapshot.docs.map(doc => ({
-      ...doc.data(),
-      teacherId: doc.id,
-      role: UserRole.TEACHER
-    })) as TeacherProfile[];
+    return snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        teacherId: doc.id,
+        email: data.email || '',
+        displayName: data.displayName || 'معلم غير معروف',
+        role: UserRole.TEACHER
+      };
+    }) as TeacherProfile[];
   } catch (err) {
     console.error("Error fetching all teachers:", err);
     return [];

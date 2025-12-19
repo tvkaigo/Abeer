@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import WelcomeScreen from './components/WelcomeScreen';
 import GameScreen from './components/GameScreen';
@@ -22,11 +23,17 @@ const App: React.FC = () => {
   const [timeLimit, setTimeLimit] = useState<number>(120);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
+  
+  // حالة خاصة للمعلم في حال الدخول بدون Firebase Auth (بالبريد فقط)
+  const [manualTeacher, setManualTeacher] = useState<TeacherProfile | null>(null);
 
   useEffect(() => {
     let userSubUnsubscribe: () => void = () => {};
 
     const authUnsubscribe = onAuthStateChanged(auth, async (user) => {
+      // إذا كان هناك معلم مسجل يدوياً، لا نمسح الحالة فوراً
+      if (manualTeacher) return;
+
       setCurrentUser(user);
       if (user) {
         await createOrUpdatePlayerProfile(user.uid, user.email || '', user.displayName || '');
@@ -46,7 +53,7 @@ const App: React.FC = () => {
       authUnsubscribe();
       userSubUnsubscribe();
     };
-  }, []);
+  }, [manualTeacher]);
 
   const handleStartGame = (config: GameConfig) => {
     setCurrentConfig(config);
@@ -94,20 +101,38 @@ const App: React.FC = () => {
     setIsNewHighScore(false);
   };
 
-  if (isAuthChecking) {
+  const handleTeacherLogin = (teacher: TeacherProfile) => {
+      setManualTeacher(teacher);
+      setCurrentUserData(teacher);
+      setIsAuthChecking(false);
+  };
+
+  const handleLogout = () => {
+      setManualTeacher(null);
+      setCurrentUserData(null);
+      setCurrentUser(null);
+      auth.signOut();
+  };
+
+  if (isAuthChecking && !manualTeacher) {
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-indigo-50">
             <div className="w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-            <p className="mt-4 text-indigo-900 font-bold">جاري التأكد من الحساب...</p>
+            <p className="mt-4 text-indigo-900 font-bold">جاري التحميل...</p>
         </div>
     );
   }
 
+  // المعرف الحالي سواء كان من Firebase أو يدوي
+  const effectiveUid = manualTeacher ? manualTeacher.teacherId : currentUser?.uid;
+
   return (
     <div className="min-h-screen text-slate-800 font-sans">
-      {!currentUser && <UserEntryModal onSuccess={() => {}} />}
+      {!effectiveUid && (
+          <UserEntryModal onSuccess={(teacher) => teacher ? handleTeacherLogin(teacher) : null} />
+      )}
       
-      {currentUser && (
+      {effectiveUid && (
         <>
             {appState === AppState.WELCOME && (
                 <WelcomeScreen 
@@ -116,15 +141,15 @@ const App: React.FC = () => {
                     onShowAnalytics={() => setAppState(AppState.ANALYTICS)}
                     onShowLeaderboard={() => setAppState(AppState.LEADERBOARD)}
                     highScore={highScore}
-                    userName={currentUserData?.displayName || currentUser.displayName || currentUser.email || ''}
+                    userName={currentUserData?.displayName || (currentUser ? (currentUser.displayName || currentUser.email) : (manualTeacher?.displayName || manualTeacher?.email)) || ''}
                     currentTotalScore={currentUserData?.role === UserRole.STUDENT ? (currentUserData as UserStats).totalCorrect : 0}
                     role={currentUserData?.role}
-                    teacherId={currentUserData?.role === UserRole.STUDENT ? (currentUserData as UserStats).teacherId : undefined}
+                    teacherId={currentUserData?.role === UserRole.STUDENT ? (currentUserData as UserStats).teacherId : (currentUserData?.role === UserRole.TEACHER ? (currentUserData as TeacherProfile).teacherId : undefined)}
                 />
             )}
             
-            {appState === AppState.ANALYTICS && <AnalyticsScreen onBack={handleRestart} userName={currentUser.uid} />}
-            {appState === AppState.LEADERBOARD && <LeaderboardScreen onBack={handleRestart} currentUser={currentUser.uid} />}
+            {appState === AppState.ANALYTICS && effectiveUid && <AnalyticsScreen onBack={handleRestart} userName={effectiveUid} />}
+            {appState === AppState.LEADERBOARD && effectiveUid && <LeaderboardScreen onBack={handleRestart} currentUser={effectiveUid} />}
             {appState === AppState.PLAYING && <GameScreen questions={questions} onEndGame={handleEndGame} onExit={handleRestart} initialTime={timeLimit} isSaving={isSaving} />}
             {appState === AppState.RESULTS && gameResult && currentConfig && (
                 <ResultScreen 
@@ -132,7 +157,7 @@ const App: React.FC = () => {
                     difficulty={currentConfig.difficulty}
                     onRestart={handleRestart} 
                     isNewHighScore={isNewHighScore}
-                    userName={currentUserData?.displayName || currentUser.displayName || currentUser.email || ''}
+                    userName={currentUserData?.displayName || (currentUser ? (currentUser.displayName || currentUser.email) : (manualTeacher?.displayName || manualTeacher?.email)) || ''}
                     totalCumulativeScore={currentUserData?.role === UserRole.STUDENT ? (currentUserData as UserStats).totalCorrect : 0}
                 />
             )}
