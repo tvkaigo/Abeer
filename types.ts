@@ -44,7 +44,8 @@ export enum AppState {
   PLAYING = 'PLAYING',
   RESULTS = 'RESULTS',
   ANALYTICS = 'ANALYTICS',
-  LEADERBOARD = 'LEADERBOARD'
+  LEADERBOARD = 'LEADERBOARD',
+  PROFILE = 'PROFILE'
 }
 
 export interface DailyStat {

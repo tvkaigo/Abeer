@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect } from 'react';
-import { Difficulty, Operation, GameConfig, TeacherProfile, UserRole } from '../types';
-import { Brain, Calculator, ChevronLeft, Zap, Divide, X as MultiplyIcon, Plus, Minus, Trophy, BarChart3, Timer, Star, LogOut, UserCheck } from 'lucide-react';
+import { Difficulty, Operation, GameConfig, TeacherProfile, UserRole, AppState } from '../types';
+import { Brain, Calculator, ChevronLeft, Zap, Divide, X as MultiplyIcon, Plus, Minus, Trophy, BarChart3, Timer, Star, LogOut, UserCheck, User } from 'lucide-react';
 import { initAudio } from '../services/soundService';
 import { getBadgeDefinitions, auth, fetchTeacherInfo } from '../services/statsService';
 import { signOut } from 'firebase/auth';
@@ -10,6 +11,7 @@ interface WelcomeScreenProps {
   onQuickStart: () => void;
   onShowAnalytics: () => void;
   onShowLeaderboard: () => void;
+  onShowProfile: () => void;
   highScore: number;
   userName?: string;
   currentTotalScore?: number;
@@ -22,6 +24,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
     onQuickStart, 
     onShowAnalytics, 
     onShowLeaderboard, 
+    onShowProfile,
     highScore, 
     userName,
     currentTotalScore = 0,
@@ -81,6 +84,14 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
 
       {/* Action Buttons */}
       <div className="absolute top-6 right-6 flex gap-2 animate-pop-in">
+        <button 
+            onClick={onShowProfile}
+            className="bg-white/80 backdrop-blur-sm p-3 rounded-2xl shadow-sm border border-indigo-100 text-indigo-600 hover:bg-white hover:scale-105 transition-all"
+            title="ملفي الشخصي"
+        >
+            <User size={20} />
+        </button>
+
         <button 
             onClick={onShowLeaderboard}
             className="bg-white/80 backdrop-blur-sm px-4 py-2 rounded-2xl shadow-sm border border-yellow-100 flex items-center gap-2 text-indigo-900 font-bold hover:bg-white hover:scale-105 transition-all"

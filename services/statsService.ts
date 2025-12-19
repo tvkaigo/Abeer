@@ -24,7 +24,8 @@ import {
   signOut, 
   User,
   setPersistence,
-  browserLocalPersistence
+  browserLocalPersistence,
+  updateProfile
 } from 'firebase/auth';
 import { getAnalytics, isSupported } from 'firebase/analytics';
 import { UserStats, GameResult, LeaderboardEntry, Badge, UserRole, TeacherProfile } from '../types';
@@ -152,7 +153,7 @@ export const isTeacherByEmail = async (email: string): Promise<boolean> => {
 export const fetchTeacherInfo = async (teacherId: string): Promise<TeacherProfile | null> => {
   if (!teacherId) return null;
   try {
-    const docRef = doc(db, TEACHERS_COLLECTION, teacherId);
+    const docRef = doc(db, TEACHERS_COLLECTION, teacherId.trim().toLowerCase());
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) return { ...docSnap.data(), teacherId: docSnap.id, role: UserRole.TEACHER } as TeacherProfile;
   } catch (error) {
@@ -194,13 +195,15 @@ export const createOrUpdatePlayerProfile = async (uid: string, email: string, di
     const studentRef = doc(db, USERS_COLLECTION, uid);
     try {
       const snap = await getDoc(studentRef);
+      const cleanTeacherId = teacherId?.trim().toLowerCase() || '';
+      
       if (!snap.exists()) {
           await setDoc(studentRef, {
               uid, 
-              email, 
+              email: email.trim().toLowerCase(), 
               displayName: displayName || 'لاعب جديد', 
               role: UserRole.STUDENT, 
-              teacherId: teacherId || '', 
+              teacherId: cleanTeacherId, 
               totalCorrect: 0, 
               totalIncorrect: 0, 
               streak: 0, 
@@ -209,7 +212,7 @@ export const createOrUpdatePlayerProfile = async (uid: string, email: string, di
               badgesCount: 0
           });
       } else if (teacherId) {
-          await updateDoc(studentRef, { teacherId });
+          await updateDoc(studentRef, { teacherId: cleanTeacherId });
       }
     } catch (e) {
       console.error("Error in createOrUpdatePlayerProfile:", e);
@@ -262,16 +265,17 @@ export const updateUserStats = async (result: GameResult, uid: string) => {
 };
 
 export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => void, teacherId: string) => {
-  // التأكد من جلب الطلاب المرتبطين بنفس المعلم فقط
   if (!teacherId || teacherId === 'none') {
     callback([]);
     return () => {};
   }
 
-  // استخدام استعلام مفلتر بـ teacherId لضمان الخصوصية وكفاءة جلب البيانات
+  const cleanTeacherId = teacherId.trim().toLowerCase();
+
+  // جلب كافة طلاب الفصل بدون حد أقصى (Limit) لضمان ظهور الجميع
   const q = query(
     collection(db, USERS_COLLECTION),
-    where("teacherId", "==", teacherId)
+    where("teacherId", "==", cleanTeacherId)
   );
 
   const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -285,7 +289,7 @@ export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => v
         totalCorrect: data.totalCorrect || 0,
         badgesCount: data.badgesCount || 0,
         lastActive: data.lastActive || '',
-        teacherId: data.teacherId // ضروري للفلترة الإضافية في الواجهة
+        teacherId: data.teacherId // ضروري للفلترة في الواجهة
       });
     });
     callback(students);
@@ -295,6 +299,23 @@ export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => v
   });
 
   return unsubscribe;
+};
+
+export const updateUserProfileName = async (uid: string, newName: string, role: UserRole, teacherId?: string): Promise<void> => {
+    const user = auth.currentUser;
+    if (!user) throw new Error("يجب تسجيل الدخول أولاً");
+
+    // 1. تحديث الاسم في Firebase Auth
+    await updateProfile(user, { displayName: newName });
+
+    // 2. تحديث الاسم في Firestore
+    if (role === UserRole.STUDENT) {
+        const studentRef = doc(db, USERS_COLLECTION, uid);
+        await updateDoc(studentRef, { displayName: newName });
+    } else if (role === UserRole.TEACHER && teacherId) {
+        const teacherRef = doc(db, TEACHERS_COLLECTION, teacherId);
+        await updateDoc(teacherRef, { displayName: newName });
+    }
 };
 
 export const isCloudEnabledValue = () => true;

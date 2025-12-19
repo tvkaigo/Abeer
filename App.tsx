@@ -5,6 +5,7 @@ import GameScreen from './components/GameScreen';
 import ResultScreen from './components/ResultScreen';
 import AnalyticsScreen from './components/AnalyticsScreen';
 import LeaderboardScreen from './components/LeaderboardScreen';
+import ProfileScreen from './components/ProfileScreen';
 import UserEntryModal from './components/UserEntryModal';
 import { AppState, GameConfig, GameResult, Question, Difficulty, Operation, UserStats, UserRole, TeacherProfile } from './types';
 import { generateQuestions } from './services/mathService';
@@ -144,12 +145,20 @@ const App: React.FC = () => {
                     onQuickStart={handleQuickStart}
                     onShowAnalytics={() => setAppState(AppState.ANALYTICS)}
                     onShowLeaderboard={() => setAppState(AppState.LEADERBOARD)}
+                    onShowProfile={() => setAppState(AppState.PROFILE)}
                     highScore={highScore}
                     userName={currentUserData?.displayName || currentUser.displayName || ''}
                     currentTotalScore={currentUserData?.role === UserRole.STUDENT ? (currentUserData as UserStats).totalCorrect : 0}
                     role={currentUserData?.role}
                     teacherId={currentUserData?.role === UserRole.STUDENT ? (currentUserData as UserStats).teacherId : (currentUserData?.role === UserRole.TEACHER ? (currentUserData as TeacherProfile).teacherId : undefined)}
                 />
+            )}
+            {appState === AppState.PROFILE && (
+              <ProfileScreen 
+                onBack={handleRestart} 
+                playerData={currentUserData} 
+                userId={currentUser.uid} 
+              />
             )}
             {appState === AppState.ANALYTICS && (
               <AnalyticsScreen 

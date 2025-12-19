@@ -61,10 +61,14 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
       return;
     }
 
+    const cleanTeacherId = teacherId.trim().toLowerCase();
+
     // الاشتراك في بيانات الطلاب المرتبطين بنفس المعلم
     const unsubscribe = subscribeToLeaderboard((data) => {
-      // فلترة إضافية للتأكد أن كل الطلاب مرتبطين بالمعلم
-      const filtered = data.filter(student => student.teacherId === teacherId);
+      // فلترة إضافية للتأكد أن كل الطلاب مرتبطين بالمعلم (تجنب أي تداخل في Firestore)
+      const filtered = data.filter(student => 
+        student.teacherId && student.teacherId.trim().toLowerCase() === cleanTeacherId
+      );
       
       // ترتيب حسب النقاط من الأعلى إلى الأقل
       const sorted = filtered.sort((a, b) => b.totalCorrect - a.totalCorrect);
@@ -72,7 +76,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
       setLeaders(sorted);
       setIsLoading(false);
       setOffline(!isCloudEnabledValue());
-    }, teacherId);
+    }, cleanTeacherId);
 
     return () => unsubscribe();
   }, [teacherId, isResolvingContext]);
