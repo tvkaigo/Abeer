@@ -55,19 +55,34 @@ const getLocalDateString = (date: Date = new Date()): string => {
   return `${year}-${month}-${day}`;
 };
 
+/**
+ * إرسال رابط تسجيل الدخول للمعلم بعد التحقق من وجوده وصلاحيته
+ */
 export const sendTeacherSignInLink = async (email: string) => {
   const cleanEmail = email.trim().toLowerCase();
-  const q = query(collection(db, TEACHERS_COLLECTION), where("email", "==", cleanEmail), where("active", "==", true));
+  
+  // التحقق من وجود المعلم وحالته
+  const q = query(
+    collection(db, TEACHERS_COLLECTION), 
+    where("email", "==", cleanEmail), 
+    where("active", "==", true)
+  );
+  
   const snapshot = await getDocs(q);
   if (snapshot.empty) {
-    throw new Error("عذراً، هذا البريد غير مصرح له بالدخول كمعلم أو الحساب غير نشط.");
+    throw new Error("عذراً، هذا البريد غير مسجل كمعلم نشط في النظام.");
   }
+  
   await sendSignInLinkToEmail(auth, cleanEmail, actionCodeSettings);
   window.localStorage.setItem('emailForSignIn', cleanEmail);
 };
 
+/**
+ * إكمال تسجيل الدخول عبر الرابط وربط الـ UID بالسجل
+ */
 export const completeSignInWithLink = async (): Promise<User> => {
   if (!isSignInWithEmailLink(auth, window.location.href)) throw new Error("الرابط غير صالح.");
+  
   let email = window.localStorage.getItem('emailForSignIn');
   if (!email) email = window.prompt('يرجى إدخال بريدك الإلكتروني للتأكيد:');
   if (!email) throw new Error("البريد الإلكتروني مطلوب.");
@@ -76,10 +91,14 @@ export const completeSignInWithLink = async (): Promise<User> => {
   window.localStorage.removeItem('emailForSignIn');
 
   if (result.user) {
+    // ربط الـ UID بسجل المعلم
     const q = query(collection(db, TEACHERS_COLLECTION), where("email", "==", email.toLowerCase()));
     const snap = await getDocs(q);
     if (!snap.empty) {
-      await updateDoc(snap.docs[0].ref, { uid: result.user.uid, lastLogin: serverTimestamp() });
+      await updateDoc(snap.docs[0].ref, { 
+        uid: result.user.uid, 
+        lastLogin: serverTimestamp() 
+      });
     }
   }
   return result.user;
@@ -96,18 +115,23 @@ export const getBadgeDefinitions = (totalCorrect: number): Badge[] => [
 
 export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile | null> => {
   if (!uid) return null;
+  
+  // البحث في الطلاب أولاً
   const studentRef = doc(db, USERS_COLLECTION, uid);
   const studentSnap = await getDoc(studentRef);
   if (studentSnap.exists()) {
     const data = studentSnap.data() as UserStats;
     return { ...data, uid: studentSnap.id, badges: getBadgeDefinitions(data.totalCorrect || 0) };
   }
+  
+  // البحث في المعلمين بواسطة UID
   const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
   const tSnap = await getDocs(q);
   if (!tSnap.empty) {
     const data = tSnap.docs[0].data();
     return { ...data, teacherId: tSnap.docs[0].id, role: UserRole.TEACHER } as TeacherProfile;
   }
+  
   return null;
 };
 
@@ -133,7 +157,10 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
     } else {
         const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
         const tSnap = await getDocs(q);
-        if (!tSnap.empty) callback({ ...tSnap.docs[0].data(), teacherId: tSnap.docs[0].id, role: UserRole.TEACHER });
+        if (!tSnap.empty) {
+          const data = tSnap.docs[0].data();
+          callback({ ...data, teacherId: tSnap.docs[0].id, role: UserRole.TEACHER });
+        }
     }
   });
 };
@@ -143,8 +170,10 @@ export const createOrUpdatePlayerProfile = async (uid: string, email: string, di
     const snap = await getDoc(studentRef);
     if (!snap.exists()) {
         await setDoc(studentRef, {
-            uid, email, displayName, role: UserRole.STUDENT, teacherId, totalCorrect: 0, totalIncorrect: 0, streak: 0, lastActive: new Date().toISOString(), dailyHistory: {}
+            uid, email, displayName, role: UserRole.STUDENT, teacherId: teacherId || '', totalCorrect: 0, totalIncorrect: 0, streak: 0, lastActive: new Date().toISOString(), dailyHistory: {}
         });
+    } else if (teacherId) {
+        await updateDoc(studentRef, { teacherId });
     }
 };
 
@@ -171,12 +200,25 @@ export const updateUserStats = async (result: GameResult, uid: string) => {
 };
 
 export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => void, teacherId?: string) => {
-  const q = teacherId && teacherId !== 'none' 
-    ? query(collection(db, USERS_COLLECTION), where("teacherId", "==", teacherId), orderBy("totalCorrect", "desc"))
-    : query(collection(db, USERS_COLLECTION), orderBy("totalCorrect", "desc"), limit(50));
+  let q;
+  if (teacherId && teacherId !== 'none') {
+    q = query(collection(db, USERS_COLLECTION), where("teacherId", "==", teacherId), orderBy("totalCorrect", "desc"));
+  } else {
+    q = query(collection(db, USERS_COLLECTION), orderBy("totalCorrect", "desc"), limit(50));
+  }
 
   return onSnapshot(q, (snapshot) => {
-    const leaders = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() }));
+    const leaders = snapshot.docs.map(doc => {
+      const data = doc.data();
+      return { 
+        uid: doc.id, 
+        displayName: data.displayName || 'لاعب',
+        role: data.role || UserRole.STUDENT,
+        totalCorrect: data.totalCorrect || 0,
+        badgesCount: data.badgesCount || 0,
+        lastActive: data.lastActive || ''
+      };
+    });
     callback(leaders as any);
   });
 };
@@ -194,7 +236,7 @@ export const getLast7DaysStatsValue = (stats: UserStats) => {
     const dayStat = stats.dailyHistory && stats.dailyHistory[dateStr] 
       ? stats.dailyHistory[dateStr] 
       : { correct: 0, incorrect: 0 };
-    days.push({ label, date: dateStr, correct: dayStat.correct, incorrect: dayStat.incorrect });
+    days.push({ label, date: dateStr, correct: dayStat.correct || 0, incorrect: dayStat.incorrect || 0 });
   }
   return days;
 };

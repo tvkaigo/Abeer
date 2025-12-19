@@ -53,6 +53,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
 
   useEffect(() => {
     if (isResolvingContext || teacherId === null) return;
+    
     if (teacherId === 'none') {
         setLeaders([]);
         setIsLoading(false);
@@ -209,6 +210,12 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                 <div className="text-center p-20 bg-white rounded-[3rem] border-2 border-dashed border-slate-200 text-slate-400">
                     <Trophy size={64} className="mx-auto mb-4 opacity-10" />
                     <p className="font-bold text-lg">لم ينضم أحد للمنافسة في هذا الفصل بعد!</p>
+                    {teacherId === 'none' && (
+                        <div className="mt-4 flex items-center justify-center gap-2 text-amber-600 bg-amber-50 p-4 rounded-2xl border border-amber-100 max-w-sm mx-auto">
+                            <AlertCircle size={20} />
+                            <span className="text-sm font-black text-right">أنت لست مرتبطاً بمعلم حالياً، يرجى تحديث بياناتك ليظهر زملاؤك.</span>
+                        </div>
+                    )}
                 </div>
               ) : (
                 leaders.map((player, index) => {
