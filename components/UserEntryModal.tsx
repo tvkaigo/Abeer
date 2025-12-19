@@ -56,6 +56,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
 
     try {
       if (mode === 'teacher') {
+        // سيقوم هذا التابع بالتحقق من (active: true) داخلياً
         await sendTeacherSignInLink(email.trim());
         setLinkSent(true);
       } else if (mode === 'signup') {
@@ -192,7 +193,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
           )}
 
           <div>
-            <label className="block text-slate-700 font-bold mb-2 pr-1 text-sm">البريد الإلكتروني</label>
+            <label className="block text-slate-700 font-bold mb-2 pr-1 text-sm">البريد الإلكتروني للمعلم</label>
             <div className="relative">
               <input 
                 type="email"
@@ -229,7 +230,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
             <div className="bg-purple-50 p-4 rounded-2xl border border-purple-100 flex items-start gap-3 animate-fade-in">
               <AlertCircle size={20} className="text-purple-600 shrink-0 mt-0.5" />
               <p className="text-xs text-purple-800 leading-relaxed font-bold">
-                سيتم إرسال رابط تسجيل دخول لمرة واحدة إلى بريدك. لا حاجة لكلمة مرور، فقط تأكد أن بريدك مسجل مسبقاً في النظام.
+                سيتم التحقق من حالة حسابك أولاً. إذا كنت معلماً نشطاً، سيصلك رابط الدخول الآمن فوراً.
               </p>
             </div>
           )}
@@ -249,7 +250,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
             {isLoading ? (
               <Loader2 className="animate-spin" size={24} />
             ) : mode === 'teacher' ? (
-              <>تسجيل الدخول كمعلم <Send size={20} className="rtl:rotate-180" /></>
+              <>تسجيل الدخول <Send size={20} className="rtl:rotate-180" /></>
             ) : mode === 'login' ? (
               <>دخول الطالب <LogIn size={20} className="rotate-180" /></>
             ) : (

@@ -43,7 +43,7 @@ isSupported().then(supported => {
 const USERS_COLLECTION = 'users';
 const TEACHERS_COLLECTION = 'Teachers';
 
-// إعدادات رابط تسجيل الدخول المحدثة
+// إعدادات رابط تسجيل الدخول الموجه إلى صفحة الإنهاء المخصصة
 const actionCodeSettings = {
   url: 'https://abeer-stzj-new.vercel.app/finish-signin',
   handleCodeInApp: true
@@ -57,16 +57,16 @@ const getLocalDateString = (date: Date = new Date()): string => {
 };
 
 /**
- * إرسال رابط تسجيل الدخول للمعلم بعد التحقق من وجوده في مجموعة Teachers
+ * إرسال رابط تسجيل الدخول للمعلم بعد التحقق من وجوده وتفعيله
  */
 export const sendTeacherSignInLink = async (email: string) => {
   const cleanEmail = email.trim().toLowerCase();
   
-  // التحقق من وجود المعلم باستخدام البريد كمعرف للمستند
+  // التحقق من وجود المعلم وصلاحية دخوله (active: true)
   const docRef = doc(db, TEACHERS_COLLECTION, cleanEmail);
   const snap = await getDoc(docRef);
 
-  if (!snap.exists()) {
+  if (!snap.exists() || snap.data()?.active !== true) {
     throw new Error("عذراً، هذا البريد غير مصرح له بالدخول كمعلم.");
   }
   
@@ -94,7 +94,7 @@ export const completeSignInWithLink = async (): Promise<User> => {
   window.localStorage.removeItem('emailForSignIn');
 
   if (result.user) {
-    // ربط الـ UID بسجل المعلم
+    // ربط الـ UID بسجل المعلم لضمان التعرف عليه في المرات القادمة
     const teacherDocRef = doc(db, TEACHERS_COLLECTION, cleanEmail);
     const teacherSnap = await getDoc(teacherDocRef);
     
@@ -102,8 +102,7 @@ export const completeSignInWithLink = async (): Promise<User> => {
       await updateDoc(teacherDocRef, { 
         uid: result.user.uid, 
         linkedAt: serverTimestamp(),
-        lastLogin: serverTimestamp(),
-        active: true
+        lastLogin: serverTimestamp()
       });
     }
   }
