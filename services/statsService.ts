@@ -43,7 +43,7 @@ isSupported().then(supported => {
 const USERS_COLLECTION = 'users';
 const TEACHERS_COLLECTION = 'Teachers';
 
-// إعدادات رابط تسجيل الدخول المحدثة حسب طلبك
+// إعدادات رابط تسجيل الدخول المحدثة
 const actionCodeSettings = {
   url: 'https://abeer-stzj-new.vercel.app/finish-signin',
   handleCodeInApp: true
@@ -62,7 +62,7 @@ const getLocalDateString = (date: Date = new Date()): string => {
 export const sendTeacherSignInLink = async (email: string) => {
   const cleanEmail = email.trim().toLowerCase();
   
-  // التحقق من وجود المعلم باستخدام البريد كمعرف للمستند (Document ID)
+  // التحقق من وجود المعلم باستخدام البريد كمعرف للمستند
   const docRef = doc(db, TEACHERS_COLLECTION, cleanEmail);
   const snap = await getDoc(docRef);
 
@@ -70,9 +70,7 @@ export const sendTeacherSignInLink = async (email: string) => {
     throw new Error("عذراً، هذا البريد غير مصرح له بالدخول كمعلم.");
   }
   
-  // إرسال الرابط
   await sendSignInLinkToEmail(auth, cleanEmail, actionCodeSettings);
-  // حفظ البريد محلياً لتسهيل عملية الدخول لاحقاً
   window.localStorage.setItem('emailForSignIn', cleanEmail);
 };
 
@@ -85,8 +83,6 @@ export const completeSignInWithLink = async (): Promise<User> => {
   }
   
   let email = window.localStorage.getItem('emailForSignIn');
-  
-  // إذا فُتح الرابط في جهاز أو متصفح مختلف، نطلب الإيميل للتأكيد
   if (!email) {
     email = window.prompt('يرجى إدخال بريدك الإلكتروني للتأكيد:');
   }
@@ -98,7 +94,7 @@ export const completeSignInWithLink = async (): Promise<User> => {
   window.localStorage.removeItem('emailForSignIn');
 
   if (result.user) {
-    // ربط الـ UID بسجل المعلم وتحديث بيانات الدخول
+    // ربط الـ UID بسجل المعلم
     const teacherDocRef = doc(db, TEACHERS_COLLECTION, cleanEmail);
     const teacherSnap = await getDoc(teacherDocRef);
     
@@ -107,7 +103,7 @@ export const completeSignInWithLink = async (): Promise<User> => {
         uid: result.user.uid, 
         linkedAt: serverTimestamp(),
         lastLogin: serverTimestamp(),
-        active: true // التأكد من تفعيل الحساب عند الربط
+        active: true
       });
     }
   }

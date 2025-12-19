@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, Mail, Lock, LogIn, UserPlus, Loader2, AlertCircle, UserCheck, ChevronDown, GraduationCap, CheckCircle2 } from 'lucide-react';
+import { User, Mail, Lock, LogIn, UserPlus, Loader2, AlertCircle, UserCheck, ChevronDown, GraduationCap, CheckCircle2, Send } from 'lucide-react';
 import { auth, createOrUpdatePlayerProfile, fetchAllTeachers, sendTeacherSignInLink } from '../services/statsService';
 import { 
     signInWithEmailAndPassword, 
@@ -103,9 +103,9 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
             </p>
             <button 
                 onClick={() => setLinkSent(false)}
-                className="text-indigo-600 font-bold hover:underline"
+                className="bg-indigo-600 text-white font-bold py-3 px-8 rounded-2xl shadow-lg hover:bg-indigo-700 transition-all"
             >
-                العودة للخلف
+                تم، العودة للخلف
             </button>
         </div>
       </div>
@@ -125,7 +125,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
              {mode === 'teacher' ? 'بوابة المعلم' : 'العبقري الصغير'}
           </h2>
           <p className="text-slate-500 mt-2 font-medium">
-            {mode === 'login' ? 'سجل دخولك لمتابعة تقدمك' : mode === 'signup' ? 'أنشئ حساباً جديداً لتبدأ رحلتك' : 'سجل دخولك كمعلم عبر البريد'}
+            {mode === 'login' ? 'سجل دخولك لمتابعة تقدمك' : mode === 'signup' ? 'أنشئ حساباً جديداً لتبدأ رحلتك' : 'تسجيل دخول آمن للمعلمين المصرح لهم'}
           </p>
         </div>
 
@@ -200,7 +200,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
                 dir="ltr"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="name@example.com"
+                placeholder="name@teacher.com"
                 className={`w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 outline-none transition-all pr-12 bg-slate-50 text-right font-medium ${mode === 'teacher' ? 'focus:border-purple-500 focus:ring-purple-50' : 'focus:border-indigo-500 focus:ring-indigo-50'}`}
               />
               <Mail className="absolute right-4 top-4 text-slate-400" size={20} />
@@ -225,6 +225,15 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
             </div>
           )}
 
+          {mode === 'teacher' && (
+            <div className="bg-purple-50 p-4 rounded-2xl border border-purple-100 flex items-start gap-3 animate-fade-in">
+              <AlertCircle size={20} className="text-purple-600 shrink-0 mt-0.5" />
+              <p className="text-xs text-purple-800 leading-relaxed font-bold">
+                سيتم إرسال رابط تسجيل دخول لمرة واحدة إلى بريدك. لا حاجة لكلمة مرور، فقط تأكد أن بريدك مسجل مسبقاً في النظام.
+              </p>
+            </div>
+          )}
+
           {error && (
             <div className="bg-red-50 text-red-600 p-4 rounded-2xl text-sm font-black flex items-start gap-2 border border-red-100 shadow-sm">
               <AlertCircle size={20} className="shrink-0" />
@@ -235,12 +244,12 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
           <button 
             type="submit"
             disabled={isLoading || (mode === 'signup' && (isFetchingTeachers || teachers.length === 0))}
-            className={`w-full text-white font-black py-4 rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2 mt-4 disabled:opacity-70 ${mode === 'teacher' ? 'bg-purple-600 hover:bg-purple-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+            className={`w-full text-white font-black py-4 rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2 mt-4 disabled:opacity-70 ${mode === 'teacher' ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-200' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'}`}
           >
             {isLoading ? (
               <Loader2 className="animate-spin" size={24} />
             ) : mode === 'teacher' ? (
-              <>إرسال رابط الدخول <Mail size={20} /></>
+              <>تسجيل الدخول كمعلم <Send size={20} className="rtl:rotate-180" /></>
             ) : mode === 'login' ? (
               <>دخول الطالب <LogIn size={20} className="rotate-180" /></>
             ) : (
