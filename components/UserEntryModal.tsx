@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, Mail, Lock, LogIn, UserPlus, Loader2, AlertCircle, UserCheck, ChevronDown, GraduationCap, CheckCircle2 } from 'lucide-react';
+import { User, Mail, Lock, LogIn, UserPlus, Loader2, AlertCircle, UserCheck, ChevronDown, GraduationCap, CheckCircle2, Info } from 'lucide-react';
 import { auth, createOrUpdatePlayerProfile, fetchAllTeachers, sendTeacherSignInLink } from '../services/statsService';
 import { 
     signInWithEmailAndPassword, 
@@ -49,6 +49,8 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
     }
   }, [mode]);
 
+  const isValidEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim());
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -56,6 +58,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
 
     try {
       if (mode === 'teacher') {
+        if (!isValidEmail(email)) throw new Error("يرجى إدخال بريد إلكتروني صحيح");
         await sendTeacherSignInLink(email.trim());
         setLinkSent(true);
       } else if (mode === 'signup') {
@@ -207,6 +210,15 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
             </div>
           </div>
 
+          {mode === 'teacher' && (
+            <div className="bg-indigo-50 text-indigo-700 p-4 rounded-2xl text-xs font-bold flex items-start gap-3 border border-indigo-100 animate-fade-in">
+              <Info className="shrink-0 mt-0.5" size={16} />
+              <p className="leading-relaxed">
+                سيتم إرسال رابط تسجيل دخول آمن إلى بريدك الإلكتروني. لا حاجة لكلمة مرور، اضغط على الرابط في رسالتك للدخول مباشرة.
+              </p>
+            </div>
+          )}
+
           {mode !== 'teacher' && (
             <div>
               <label className="block text-slate-700 font-bold mb-2 pr-1 text-sm">كلمة المرور</label>
@@ -234,8 +246,8 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
 
           <button 
             type="submit"
-            disabled={isLoading || (mode === 'signup' && (isFetchingTeachers || teachers.length === 0))}
-            className={`w-full text-white font-black py-4 rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2 mt-4 disabled:opacity-70 ${mode === 'teacher' ? 'bg-purple-600 hover:bg-purple-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+            disabled={isLoading || (mode === 'signup' && (isFetchingTeachers || teachers.length === 0)) || (mode === 'teacher' && !isValidEmail(email))}
+            className={`w-full text-white font-black py-4 rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2 mt-4 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed ${mode === 'teacher' ? 'bg-purple-600 hover:bg-purple-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
           >
             {isLoading ? (
               <Loader2 className="animate-spin" size={24} />
