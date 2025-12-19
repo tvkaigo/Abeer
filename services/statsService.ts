@@ -43,7 +43,7 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const db = getFirestore(app);
 export const auth = getAuth(app);
 
-// تأكيد حفظ الجلسة محلياً
+// تأكيد حفظ الجلسة محلياً لضمان عدم إعادة تسجيل الدخول في كل مرة
 setPersistence(auth, browserLocalPersistence).catch(console.error);
 
 isSupported().then(supported => {
@@ -52,7 +52,8 @@ isSupported().then(supported => {
   }
 });
 
-const USERS_COLLECTION = 'users';
+// ملاحظة: تم تعديل اسم المجموعة إلى 'Users' بطلب من المستخدم
+const USERS_COLLECTION = 'Users'; 
 const TEACHERS_COLLECTION = 'Teachers'; 
 
 const actionCodeSettings = {
@@ -80,7 +81,7 @@ export const completeSignInWithLink = async (): Promise<User> => {
   
   let email = window.localStorage.getItem('emailForSignIn');
   if (!email) {
-    email = window.prompt('يرجى إدخال بريدك الإلكتروني للتأكيد:');
+    email = window.prompt('يرجى إدخل بريدك الإلكتروني للتأكيد:');
   }
   
   if (!email) throw new Error("البريد الإلكتروني مطلوب لإكمال العملية.");
@@ -193,23 +194,27 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
 
 export const createOrUpdatePlayerProfile = async (uid: string, email: string, displayName: string, teacherId?: string) => {
     const studentRef = doc(db, USERS_COLLECTION, uid);
-    const snap = await getDoc(studentRef);
-    if (!snap.exists()) {
-        await setDoc(studentRef, {
-            uid, 
-            email, 
-            displayName: displayName || 'لاعب جديد', 
-            role: UserRole.STUDENT, 
-            teacherId: teacherId || '', 
-            totalCorrect: 0, 
-            totalIncorrect: 0, 
-            streak: 0, 
-            lastActive: new Date().toISOString(), 
-            dailyHistory: {},
-            badgesCount: 0
-        });
-    } else if (teacherId) {
-        await updateDoc(studentRef, { teacherId });
+    try {
+      const snap = await getDoc(studentRef);
+      if (!snap.exists()) {
+          await setDoc(studentRef, {
+              uid, 
+              email, 
+              displayName: displayName || 'لاعب جديد', 
+              role: UserRole.STUDENT, 
+              teacherId: teacherId || '', 
+              totalCorrect: 0, 
+              totalIncorrect: 0, 
+              streak: 0, 
+              lastActive: new Date().toISOString(), 
+              dailyHistory: {},
+              badgesCount: 0
+          });
+      } else if (teacherId) {
+          await updateDoc(studentRef, { teacherId });
+      }
+    } catch (e) {
+      console.error("Error in createOrUpdatePlayerProfile:", e);
     }
 };
 
@@ -217,41 +222,45 @@ export const updateUserStats = async (result: GameResult, uid: string) => {
     const today = getLocalDateString();
     const userRef = doc(db, USERS_COLLECTION, uid);
     
-    let snap = await getDoc(userRef);
-    if (!snap.exists()) {
-        const user = auth.currentUser;
-        if (user) {
-            await createOrUpdatePlayerProfile(uid, user.email || '', user.displayName || '');
-            snap = await getDoc(userRef);
-        } else {
-            return;
-        }
+    try {
+      let snap = await getDoc(userRef);
+      if (!snap.exists()) {
+          const user = auth.currentUser;
+          if (user) {
+              await createOrUpdatePlayerProfile(uid, user.email || '', user.displayName || '');
+              snap = await getDoc(userRef);
+          } else {
+              return;
+          }
+      }
+      
+      const data = snap.data();
+      if (!data) return;
+      
+      const dailyHistory = data.dailyHistory || {};
+      const todayStats = dailyHistory[today] || { date: today, correct: 0, incorrect: 0 };
+      
+      todayStats.correct += result.score;
+      todayStats.incorrect += (result.totalQuestions - result.score);
+
+      const totalCorrectNow = (data.totalCorrect || 0) + result.score;
+      const badgesCount = getBadgeDefinitions(totalCorrectNow).filter(b => b.unlocked).length;
+
+      await setDoc(userRef, {
+          totalCorrect: increment(result.score),
+          totalIncorrect: increment(result.totalQuestions - result.score),
+          lastActive: new Date().toISOString(),
+          lastPlayedDate: today,
+          badgesCount: badgesCount,
+          dailyHistory: {
+              ...dailyHistory,
+              [today]: todayStats
+          }
+      }, { merge: true });
+    } catch (e) {
+      console.error("Error in updateUserStats:", e);
+      throw e;
     }
-    
-    const data = snap.data();
-    if (!data) return;
-    
-    const dailyHistory = data.dailyHistory || {};
-    const todayStats = dailyHistory[today] || { date: today, correct: 0, incorrect: 0 };
-    
-    todayStats.correct += result.score;
-    todayStats.incorrect += (result.totalQuestions - result.score);
-
-    const totalCorrectNow = (data.totalCorrect || 0) + result.score;
-    const badgesCount = getBadgeDefinitions(totalCorrectNow).filter(b => b.unlocked).length;
-
-    // استخدام setDoc مع merge بدلاً من updateDoc لضمان الحفظ حتى لو كانت هناك مشاكل في المستند
-    await setDoc(userRef, {
-        totalCorrect: increment(result.score),
-        totalIncorrect: increment(result.totalQuestions - result.score),
-        lastActive: new Date().toISOString(),
-        lastPlayedDate: today,
-        badgesCount: badgesCount,
-        dailyHistory: {
-            ...dailyHistory,
-            [today]: todayStats
-        }
-    }, { merge: true });
 };
 
 export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => void, teacherId?: string) => {

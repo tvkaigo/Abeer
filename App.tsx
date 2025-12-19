@@ -40,8 +40,7 @@ const App: React.FC = () => {
                 isLinkSigningIn.current = false;
             }
         } else {
-          // التحقق من الجلسة المحفوظة
-          setIsAuthChecking(false);
+          // حالة الدخول العادي أو الجلسة المحفوظة يتم التعامل معها في onAuthStateChanged
         }
     };
     handleLinkSignIn();
@@ -57,20 +56,22 @@ const App: React.FC = () => {
       if (user) {
         setIsAuthChecking(true);
         
-        // محاولة جلب البيانات مباشرة لتقليل وقت الانتظار
+        // محاولة جلب البيانات مباشرة للتأكد من وجود الملف الشخصي في 'Users'
         const profile = await loadStats(user.uid);
         
         if (!profile) {
             const isTeacher = await isTeacherByEmail(user.email || '');
             if (!isTeacher) {
+                // إذا لم يوجد، نقوم بإنشائه لضمان عمل المزامنة لاحقاً
                 await createOrUpdatePlayerProfile(user.uid, user.email || '', user.displayName || '');
+                const newProfile = await loadStats(user.uid);
+                setCurrentUserData(newProfile);
             }
         } else {
             setCurrentUserData(profile);
-            setIsAuthChecking(false);
         }
         
-        // بدء الاشتراك للتحديثات الحية
+        // بدء الاشتراك للتحديثات الحية لضمان بقاء البيانات محدثة
         userSubUnsubscribe = subscribeToUserStats(user.uid, (data) => {
           if (data) {
             setCurrentUserData(data);
@@ -78,10 +79,10 @@ const App: React.FC = () => {
           }
         });
 
-        // مهلة أمان لإنهاء حالة التحميل حتى لو فشل Firestore في الرد
+        // مهلة أمان لإنهاء شاشة التحميل في حال وجود تأخر من Firestore
         const timer = setTimeout(() => {
-            if (isAuthChecking) setIsAuthChecking(false);
-        }, 5000);
+            setIsAuthChecking(false);
+        }, 4000);
         return () => clearTimeout(timer);
       } else {
         setCurrentUserData(null);
