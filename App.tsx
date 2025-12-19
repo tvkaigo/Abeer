@@ -26,12 +26,13 @@ const App: React.FC = () => {
   
   useEffect(() => {
     const handleLinkSignIn = async () => {
+        // التحقق مما إذا كان الرابط الحالي هو رابط تسجيل دخول (يعمل في أي مسار بما في ذلك finish-signin)
         if (checkIsSignInLink()) {
             try {
                 isLinkSigningIn.current = true;
                 setIsAuthChecking(true);
                 await completeSignInWithLink();
-                // تنظيف الرابط والعودة للمسار الرئيسي
+                // تنظيف الرابط والعودة للمسار الرئيسي لتجنب التكرار
                 window.history.replaceState({}, document.title, window.location.origin + '/');
             } catch (error: any) {
                 console.error("خطأ في تسجيل الدخول عبر الرابط:", error);
@@ -50,24 +51,25 @@ const App: React.FC = () => {
   useEffect(() => {
     let userSubUnsubscribe: () => void = () => {};
     const authUnsubscribe = onAuthStateChanged(auth, async (user) => {
+      // ننتظر حتى تكتمل عملية تسجيل الدخول بالرابط (إن وجدت) وتحديث Firestore أولاً
       if (isLinkSigningIn.current) return;
 
       setCurrentUser(user);
       if (user) {
-        // طباعة الـ UID المطلوبة للتأكد
+        // طباعة الـ UID المطلوبة في الكونسول للتأكد
         console.log("UID:", user.uid);
 
         const existingProfile = await loadStats(user.uid);
         
         if (!existingProfile) {
-            // التحقق من البريد الإلكتروني: هل هذا المستخدم مسجل مسبقاً كمعلم؟
+            // التحقق هل البريد مسجل كمعلم قبل إنشاء ملف طالب تلقائي
             const isTeacher = await isTeacherByEmail(user.email || '');
             
             if (!isTeacher) {
-                // فقط إذا لم يكن معلماً، ننشئ له ملف طالب جديد
+                // طالب جديد
                 await createOrUpdatePlayerProfile(user.uid, user.email || '', user.displayName || '');
             } else {
-                console.log("تم اكتشاف دخول معلم، بانتظار مزامنة Firestore...");
+                console.log("تم اكتشاف دخول معلم مسموح له، بانتظار مزامنة البيانات...");
             }
         }
         

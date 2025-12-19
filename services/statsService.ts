@@ -44,6 +44,7 @@ const USERS_COLLECTION = 'users';
 const TEACHERS_COLLECTION = 'allowedTeachers';
 
 const actionCodeSettings = {
+  // الرابط الجديد الذي سيتم معالجة تسجيل الدخول فيه
   url: 'https://abeer-stzj-new.vercel.app/finish-signin',
   handleCodeInApp: true
 };
@@ -57,6 +58,8 @@ const getLocalDateString = (date: Date = new Date()): string => {
 
 export const sendTeacherSignInLink = async (email: string) => {
   const cleanEmail = email.trim().toLowerCase();
+  
+  // التحقق من وجود المعلم في مجموعة allowedTeachers
   const docRef = doc(db, TEACHERS_COLLECTION, cleanEmail);
   const snap = await getDoc(docRef);
 
@@ -85,6 +88,7 @@ export const completeSignInWithLink = async (): Promise<User> => {
   window.localStorage.removeItem('emailForSignIn');
 
   if (result.user) {
+    // ربط الـ UID بالسجل الموجود في allowedTeachers
     const teacherDocRef = doc(db, TEACHERS_COLLECTION, cleanEmail);
     const snap = await getDoc(teacherDocRef);
     if (snap.exists()) {
