@@ -58,36 +58,35 @@ export interface Badge {
 }
 
 export interface UserStats {
-  id: number;
-  name: string;
-  displayName?: string;
+  uid: string;
+  email: string;
+  displayName: string;
   totalCorrect: number;
   totalIncorrect: number;
   streak: number;
   lastPlayedDate: string | null;
+  lastActive: string | null;
   dailyHistory: Record<string, DailyStat>;
   badges: Badge[];
+  badgesCount: number;
 }
 
 export interface LeaderboardEntry {
-  name: string;
+  uid: string;
   displayName: string;
   totalCorrect: number;
   badgesCount: number;
   lastActive: string;
 }
 
-export const PREDEFINED_USERS = [
-  { id: 1, name: 'Abeer_Mohammed', displayName: 'عبير محمد' },
-  { id: 2, name: 'Abeer_Hanash', displayName: 'عبير حنش' },
-  { id: 3, name: 'Nada', displayName: 'ندى' },
-  { id: 4, name: 'Asmaa', displayName: 'أسماء' },
-  { id: 5, name: 'Reem', displayName: 'ريم' },
-  { id: 6, name: 'Manal', displayName: 'منال' },
-  { id: 7, name: 'Aisha', displayName: 'عائشة' }
-];
-
-export const getUserDisplayName = (englishName: string): string => {
-  const user = PREDEFINED_USERS.find(u => u.name === englishName);
-  return user ? user.displayName : englishName;
+/**
+ * Helper function to extract a displayable name from a username or email.
+ * If the input is an email, it returns the part before the '@' symbol.
+ */
+export const getUserDisplayName = (userName: string): string => {
+  if (!userName) return '';
+  if (userName.includes('@')) {
+    return userName.split('@')[0];
+  }
+  return userName;
 };

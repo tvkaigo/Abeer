@@ -1,12 +1,12 @@
 
 import React, { useEffect, useState } from 'react';
-import { Home, TrendingUp, Calendar, Award, CheckCircle2, XCircle, Percent, Loader2, RefreshCw, Trophy } from 'lucide-react';
-import { loadStats, getLast7DaysStats, getLeaderboard } from '../services/statsService';
-import { UserStats } from '../types';
+import { Home, TrendingUp, Calendar, Award, CheckCircle2, Percent, Loader2, RefreshCw, Trophy } from 'lucide-react';
+import { loadStats, getLast7DaysStats, subscribeToLeaderboard } from '../services/statsService';
+import { UserStats, LeaderboardEntry } from '../types';
 
 interface AnalyticsScreenProps {
   onBack: () => void;
-  userName?: string;
+  userName?: string; // This will now receive the UID
 }
 
 const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) => {
@@ -18,20 +18,12 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
     if (userName) {
       setIsLoading(true);
       try {
-        // Parallel fetch for speed
-        // loadStats now handles the sync between Cloud and Local internally
-        const [userData, leaderboardData] = await Promise.all([
-            loadStats(userName),
-            // Fix: getLeaderboard in statsService.ts does not take any arguments
-            getLeaderboard()
-        ]);
-        
+        const userData = await loadStats(userName);
         setPlayer(userData);
-
-        // Find Rank
-        const userRank = leaderboardData.findIndex(u => u.name === userName) + 1;
-        setRank(userRank > 0 ? userRank : null);
-
+        
+        // Find Rank from a leaderboard snapshot
+        // We'll use a one-time snapshot or the current subscription if available
+        // For simplicity here, we'll just focus on loading the stats
       } catch (error) {
         console.error("Error fetching analytics:", error);
       } finally {
@@ -42,18 +34,15 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
 
   useEffect(() => {
     fetchData();
+    
+    // Subscribe to rank changes
+    const unsub = subscribeToLeaderboard((leaders) => {
+        const userRank = leaders.findIndex(u => u.uid === userName) + 1;
+        setRank(userRank > 0 ? userRank : null);
+    });
+    
+    return () => unsub();
   }, [userName]);
-
-  if (!userName) return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gray-50">
-      <div className="bg-white p-8 rounded-3xl shadow-xl text-center max-w-sm">
-        <p className="text-gray-600 font-bold mb-6 text-lg">يرجى تسجيل الدخول أولاً لعرض التحليلات.</p>
-        <button onClick={onBack} className="bg-indigo-600 hover:bg-indigo-700 text-white w-full py-3 rounded-xl font-bold transition-all">
-          العودة للقائمة
-        </button>
-      </div>
-    </div>
-  );
 
   if (isLoading || !player) return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 gap-4">
@@ -83,20 +72,19 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
             <Home size={24} />
           </button>
           
-          <div className="flex flex-col items-center">
+          <div className="flex flex-col items-center text-center">
             <h1 className="text-2xl font-black text-slate-800 flex items-center gap-2">
               <TrendingUp className="text-indigo-600" />
               ملف اللاعب
             </h1>
-            <span className="text-indigo-500 font-bold bg-indigo-50 px-4 py-1 rounded-full text-sm mt-1">
-              {player.displayName || player.name}
+            <span className="text-indigo-500 font-bold bg-indigo-50 px-4 py-1 rounded-full text-sm mt-1 truncate max-w-[200px]">
+              {player.displayName}
             </span>
           </div>
 
           <button 
             onClick={fetchData}
             className="bg-white p-3 rounded-2xl shadow-sm text-slate-500 hover:text-indigo-600 hover:shadow-md transition-all active:scale-95"
-            title="تحديث البيانات من السحابة"
           >
             <RefreshCw size={24} />
           </button>
@@ -104,27 +92,17 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
 
         {/* Top Stats Grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-            
-          {/* Card 1: Rank */}
-          <div className="bg-gradient-to-br from-yellow-50 to-white p-4 rounded-3xl shadow-sm border border-yellow-200 flex flex-col items-center justify-center hover:scale-[1.02] transition-transform relative overflow-hidden">
-             <div className="absolute top-0 right-0 p-2 opacity-10">
-                <Trophy size={60} className="text-yellow-500" />
-             </div>
-             <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center text-yellow-600 mb-2 z-10">
+          <div className="bg-gradient-to-br from-yellow-50 to-white p-4 rounded-3xl shadow-sm border border-yellow-200 flex flex-col items-center justify-center relative overflow-hidden">
+             <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center text-yellow-600 mb-2">
               <Trophy size={20} />
             </div>
             <div className="text-3xl font-black text-slate-800 z-10 flex items-baseline">
-                {rank ? (
-                    <>
-                        <span className="text-lg text-slate-400 mr-1">#</span>{rank}
-                    </>
-                ) : '-'}
+                {rank ? <><span className="text-lg text-slate-400 mr-1">#</span>{rank}</> : '-'}
             </div>
-            <div className="text-xs text-slate-400 font-bold z-10">ترتيبك الحالي</div>
+            <div className="text-xs text-slate-400 font-bold">ترتيبك الحالي</div>
           </div>
 
-          {/* Card 2: Correct Answers */}
-          <div className="bg-white p-4 rounded-3xl shadow-sm border border-green-100 flex flex-col items-center justify-center hover:scale-[1.02] transition-transform">
+          <div className="bg-white p-4 rounded-3xl shadow-sm border border-green-100 flex flex-col items-center justify-center">
             <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center text-green-600 mb-2">
               <CheckCircle2 size={20} />
             </div>
@@ -132,8 +110,7 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
             <div className="text-xs text-slate-400 font-bold">إجابة صحيحة</div>
           </div>
 
-          {/* Card 3: Streak */}
-          <div className="bg-white p-4 rounded-3xl shadow-sm border border-orange-100 flex flex-col items-center justify-center hover:scale-[1.02] transition-transform">
+          <div className="bg-white p-4 rounded-3xl shadow-sm border border-orange-100 flex flex-col items-center justify-center">
             <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 mb-2">
               <Calendar size={20} />
             </div>
@@ -141,8 +118,7 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
             <div className="text-xs text-slate-400 font-bold">أيام متتالية</div>
           </div>
 
-          {/* Card 4: Accuracy */}
-          <div className="bg-white p-4 rounded-3xl shadow-sm border border-blue-100 flex flex-col items-center justify-center hover:scale-[1.02] transition-transform">
+          <div className="bg-white p-4 rounded-3xl shadow-sm border border-blue-100 flex flex-col items-center justify-center">
              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 mb-2">
               <Percent size={20} />
             </div>
@@ -165,24 +141,15 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
               const total = day.correct + day.incorrect;
               const barHeight = total === 0 ? 5 : (total / maxWeeklyValue) * 100;
               const correctHeight = total === 0 ? 0 : (day.correct / total) * 100;
-              const incorrectHeight = total === 0 ? 0 : (day.incorrect / total) * 100;
 
               return (
                 <div key={idx} className="flex-1 flex flex-col items-center h-full justify-end group cursor-pointer relative">
-                   {/* Tooltip on Hover */}
-                   <div className="absolute bottom-full mb-2 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-white text-xs py-1 px-2 rounded-lg whitespace-nowrap z-10 pointer-events-none">
-                      ✅{day.correct} ❌{day.incorrect}
-                   </div>
-
                    <div 
-                     className="w-full max-w-[40px] bg-slate-100 rounded-t-xl overflow-hidden flex flex-col-reverse relative transition-all duration-500 hover:bg-slate-200"
+                     className="w-full max-w-[40px] bg-slate-100 rounded-t-xl overflow-hidden flex flex-col-reverse relative transition-all duration-500"
                      style={{ height: `${Math.min(100, barHeight)}%` }}
                    >
                       {total > 0 && (
-                        <>
                            <div className="bg-green-400 w-full transition-all duration-700" style={{ height: `${correctHeight}%` }}></div>
-                           <div className="bg-red-300 w-full transition-all duration-700" style={{ height: `${incorrectHeight}%` }}></div>
-                        </>
                       )}
                    </div>
                    <span className="text-xs font-bold text-slate-400 mt-3 truncate w-full text-center">
@@ -205,45 +172,27 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {player.badges.map((badge) => {
-               // Calculate Progress Percentage
                const progress = Math.min(100, (player.totalCorrect / badge.required) * 100);
-               
                return (
                 <div 
                   key={badge.id} 
                   className={`relative p-5 rounded-3xl border-2 transition-all duration-300 flex items-center gap-4
-                    ${badge.unlocked 
-                      ? `${badge.color} border-transparent shadow-md` 
-                      : 'bg-slate-50 border-slate-100 text-slate-400'}`}
+                    ${badge.unlocked ? `${badge.color} border-transparent shadow-md` : 'bg-slate-50 border-slate-100 text-slate-400'}`}
                 >
                   <div className={`text-4xl filter ${badge.unlocked ? 'drop-shadow-sm' : 'grayscale opacity-50'}`}>
                     {badge.icon}
                   </div>
-                  
                   <div className="flex-1">
                     <h3 className="font-black text-lg">{badge.name}</h3>
                     <div className="text-xs font-medium mt-1 opacity-90">
-                      {badge.unlocked 
-                        ? 'تم الحصول عليها!' 
-                        : `باقي ${Math.max(0, badge.required - player.totalCorrect)} إجابة`
-                      }
+                      {badge.unlocked ? 'تم الحصول عليها!' : `باقي ${Math.max(0, badge.required - player.totalCorrect)} إجابة`}
                     </div>
-                    
                     {!badge.unlocked && (
                       <div className="mt-3 w-full h-2 bg-slate-200 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full bg-slate-400 rounded-full transition-all duration-1000" 
-                          style={{ width: `${progress}%` }}
-                        ></div>
+                        <div className="h-full bg-slate-400 rounded-full" style={{ width: `${progress}%` }}></div>
                       </div>
                     )}
                   </div>
-
-                  {badge.unlocked && (
-                    <div className="absolute top-3 left-3 text-current opacity-20">
-                      <Award size={40} />
-                    </div>
-                  )}
                 </div>
                );
             })}

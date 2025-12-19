@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import WelcomeScreen from './components/WelcomeScreen';
 import GameScreen from './components/GameScreen';
@@ -8,7 +7,8 @@ import LeaderboardScreen from './components/LeaderboardScreen';
 import UserEntryModal from './components/UserEntryModal';
 import { AppState, GameConfig, GameResult, Question, Difficulty, Operation } from './types';
 import { generateQuestions } from './services/mathService';
-import { updateUserStats, registerNewPlayer, loadStats } from './services/statsService';
+import { updateUserStats, loadStats, auth, createOrUpdatePlayerProfile } from './services/statsService';
+import { onAuthStateChanged, User } from 'firebase/auth';
 
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.WELCOME);
@@ -20,34 +20,31 @@ const App: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [currentTotalScore, setCurrentTotalScore] = useState<number>(0);
   const [timeLimit, setTimeLimit] = useState<number>(120);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
 
-  const [userData, setUserData] = useState<{name: string} | null>(() => {
-    try {
-      const saved = localStorage.getItem('mathGeniusUserData');
-      return saved ? JSON.parse(saved) : null;
-    } catch { return null; }
-  });
-
-  // Background sync on component mount or user change
+  // Monitor Auth State
   useEffect(() => {
-    if (userData?.name) {
-      loadStats(userData.name).then(stats => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setCurrentUser(user);
+      if (user) {
+        // Sync/Create profile in Firestore
+        await createOrUpdatePlayerProfile(user.uid, user.email || '', user.displayName || 'لاعب');
+        const stats = await loadStats(user.uid);
+        if (stats) {
           setCurrentTotalScore(stats.totalCorrect);
-      }).catch(() => {});
-      registerNewPlayer(userData.name).catch(() => {});
-    }
-  }, [userData?.name]); 
-
-  useEffect(() => {
-    const savedScore = localStorage.getItem('mathGeniusHighScore');
-    if (savedScore) setHighScore(parseInt(savedScore, 10));
+          // High score in cloud context is usually handled per session or we can track it.
+          // For now, we'll keep session-based high score tracking for simplicity without demo localstorage.
+        }
+      } else {
+        // Clear session stats on logout
+        setCurrentTotalScore(0);
+        setHighScore(0);
+      }
+      setIsAuthChecking(false);
+    });
+    return () => unsubscribe();
   }, []);
-
-  const handleUserEntry = (name: string) => {
-    const data = { name };
-    setUserData(data);
-    localStorage.setItem('mathGeniusUserData', JSON.stringify(data));
-  };
 
   const handleStartGame = (config: GameConfig) => {
     setCurrentConfig(config);
@@ -69,24 +66,21 @@ const App: React.FC = () => {
     setGameResult(result);
     
     try {
-        if (userData) {
-            // FIRE AND FORGET: Update local immediately, let cloud happen in background
-            updateUserStats(result, userData.name).then(stats => {
-                setCurrentTotalScore(stats.totalCorrect);
-            }).catch(() => {});
+        if (currentUser) {
+            const stats = await updateUserStats(result, currentUser.uid);
+            setCurrentTotalScore(stats.totalCorrect);
         }
 
+        // Track session high score
         if (result.score > highScore) {
             setHighScore(result.score);
             setIsNewHighScore(true);
-            localStorage.setItem('mathGeniusHighScore', result.score.toString());
         } else {
             setIsNewHighScore(false);
         }
     } catch (e) {
-        console.warn("Local storage update failed", e);
+        console.error("Save failed", e);
     } finally {
-        // Instant transition to result screen (no waiting for Firebase)
         setTimeout(() => {
             setIsSaving(false);
             setAppState(AppState.RESULTS);
@@ -100,35 +94,47 @@ const App: React.FC = () => {
     setIsNewHighScore(false);
   };
 
+  if (isAuthChecking) {
+    return (
+        <div className="min-h-screen flex flex-col items-center justify-center bg-indigo-50">
+            <div className="w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+            <p className="mt-4 text-indigo-900 font-bold">جاري التأكد من الحساب...</p>
+        </div>
+    );
+  }
+
   return (
     <div className="min-h-screen text-slate-800 font-sans">
-      {appState === AppState.WELCOME && (
-        <>
-          <WelcomeScreen 
-            onStart={handleStartGame} 
-            onQuickStart={handleQuickStart}
-            onShowAnalytics={() => setAppState(AppState.ANALYTICS)}
-            onShowLeaderboard={() => setAppState(AppState.LEADERBOARD)}
-            highScore={highScore}
-            userName={userData?.name}
-            currentTotalScore={currentTotalScore}
-          />
-          {!userData && <UserEntryModal onSubmit={handleUserEntry} />}
-        </>
-      )}
+      {!currentUser && <UserEntryModal onSuccess={() => {}} />}
       
-      {appState === AppState.ANALYTICS && <AnalyticsScreen onBack={handleRestart} userName={userData?.name} />}
-      {appState === AppState.LEADERBOARD && <LeaderboardScreen onBack={handleRestart} currentUser={userData?.name} />}
-      {appState === AppState.PLAYING && <GameScreen questions={questions} onEndGame={handleEndGame} onExit={handleRestart} initialTime={timeLimit} isSaving={isSaving} />}
-      {appState === AppState.RESULTS && gameResult && currentConfig && (
-        <ResultScreen 
-          result={gameResult} 
-          difficulty={currentConfig.difficulty}
-          onRestart={handleRestart} 
-          isNewHighScore={isNewHighScore}
-          userName={userData?.name}
-          totalCumulativeScore={currentTotalScore}
-        />
+      {currentUser && (
+        <>
+            {appState === AppState.WELCOME && (
+                <WelcomeScreen 
+                    onStart={handleStartGame} 
+                    onQuickStart={handleQuickStart}
+                    onShowAnalytics={() => setAppState(AppState.ANALYTICS)}
+                    onShowLeaderboard={() => setAppState(AppState.LEADERBOARD)}
+                    highScore={highScore}
+                    userName={currentUser.displayName || currentUser.email || ''}
+                    currentTotalScore={currentTotalScore}
+                />
+            )}
+            
+            {appState === AppState.ANALYTICS && <AnalyticsScreen onBack={handleRestart} userName={currentUser.uid} />}
+            {appState === AppState.LEADERBOARD && <LeaderboardScreen onBack={handleRestart} currentUser={currentUser.uid} />}
+            {appState === AppState.PLAYING && <GameScreen questions={questions} onEndGame={handleEndGame} onExit={handleRestart} initialTime={timeLimit} isSaving={isSaving} />}
+            {appState === AppState.RESULTS && gameResult && currentConfig && (
+                <ResultScreen 
+                    result={gameResult} 
+                    difficulty={currentConfig.difficulty}
+                    onRestart={handleRestart} 
+                    isNewHighScore={isNewHighScore}
+                    userName={currentUser.displayName || currentUser.email || ''}
+                    totalCumulativeScore={currentTotalScore}
+                />
+            )}
+        </>
       )}
     </div>
   );

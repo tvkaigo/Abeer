@@ -1,5 +1,4 @@
-
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApp, getApps } from 'firebase/app';
 import { 
   getFirestore, 
   doc, 
@@ -8,36 +7,34 @@ import {
   collection, 
   query, 
   orderBy, 
-  getDocs, 
-  updateDoc,
   increment,
-  onSnapshot,
-  Firestore
+  onSnapshot
 } from 'firebase/firestore';
-import { UserStats, GameResult, LeaderboardEntry, PREDEFINED_USERS, Badge } from '../types';
+import { getAuth } from 'firebase/auth';
+import { getAnalytics, isSupported } from 'firebase/analytics';
+import { UserStats, GameResult, LeaderboardEntry, Badge } from '../types';
 
-// Replace with actual keys if available, but the app handles failures gracefully now.
 const firebaseConfig = {
-  apiKey: "AIzaSyAs-Placeholder-Key",
-  authDomain: "math-genius-app.firebaseapp.com",
-  projectId: "math-genius-app",
-  storageBucket: "math-genius-app.appspot.com",
-  messagingSenderId: "123456789",
-  appId: "1:123456789:web:abcdef123456"
+  apiKey: "AIzaSyAtPiYQgil6zH5TEWx5LsOmNxAAQkuyIIY",
+  authDomain: "abeer-fdf0c.firebaseapp.com",
+  projectId: "abeer-fdf0c",
+  storageBucket: "abeer-fdf0c.firebasestorage.app",
+  messagingSenderId: "289681251054",
+  appId: "1:289681251054:web:ff1fa3b3c13048a22271ff",
+  measurementId: "G-Z2SGMD4R79"
 };
 
-let db: Firestore;
-let cloudEnabled = true;
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+export const db = getFirestore(app);
+export const auth = getAuth(app);
 
-try {
-  const app = initializeApp(firebaseConfig);
-  db = getFirestore(app);
-} catch (e) {
-  console.warn("Firebase initialization failed.");
-  cloudEnabled = false;
-}
+isSupported().then(supported => {
+  if (supported) {
+    getAnalytics(app);
+  }
+});
 
-const PLAYERS_COLLECTION = 'players';
+const USERS_COLLECTION = 'Users';
 const getTodayDateString = (): string => new Date().toISOString().split('T')[0];
 
 export const getBadgeDefinitions = (totalCorrect: number): Badge[] => [
@@ -47,191 +44,144 @@ export const getBadgeDefinitions = (totalCorrect: number): Badge[] => [
   { id: 4, name: 'الأسطورة', required: 300, icon: '🏆', unlocked: totalCorrect >= 300, color: 'text-yellow-600 bg-yellow-100 border-yellow-200' },
 ];
 
-export const getInitialStats = (username: string = ''): UserStats => {
-  const userObj = PREDEFINED_USERS.find(u => u.name === username);
+export const getInitialStats = (uid: string, email: string, displayName: string): UserStats => {
   return {
-    id: userObj ? userObj.id : 0,
-    name: username,
-    displayName: userObj ? userObj.displayName : username,
+    uid,
+    email,
+    displayName,
     totalCorrect: 0,
     totalIncorrect: 0,
     streak: 0,
     lastPlayedDate: null,
-    dailyHistory: {},
-    badges: getBadgeDefinitions(0)
+    lastActive: new Date().toISOString(),
+    dailyHistory: {}, // Purely empty, no demo data
+    badges: getBadgeDefinitions(0),
+    badgesCount: 0
   };
 };
 
-// Helper to get local data for fallback
-const getLocalLeaderboardEntry = (username: string): LeaderboardEntry | null => {
+export const loadStats = async (uid: string): Promise<UserStats | null> => {
   try {
-    const localData = localStorage.getItem(`stats_${username}`);
-    if (localData) {
-      const stats = JSON.parse(localData);
+    const docSnap = await getDoc(doc(db, USERS_COLLECTION, uid));
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      const totalCorrect = Number(data.totalCorrect) || 0;
+      const badges = getBadgeDefinitions(totalCorrect);
       return {
-        name: stats.name,
-        displayName: stats.displayName || stats.name,
-        totalCorrect: stats.totalCorrect,
-        badgesCount: getBadgeDefinitions(stats.totalCorrect).filter(b => b.unlocked).length,
-        lastActive: stats.lastPlayedDate || 'اليوم'
-      };
+        ...data,
+        uid: docSnap.id,
+        badges,
+        badgesCount: badges.filter(b => b.unlocked).length
+      } as UserStats;
     }
-  } catch (e) {}
-  return null;
-};
-
-export const loadStats = async (username: string): Promise<UserStats> => {
-  if (!username) return getInitialStats();
-  const localKey = `stats_${username}`;
-  const localData = localStorage.getItem(localKey);
-  const stats = localData ? JSON.parse(localData) : getInitialStats(username);
-
-  if (cloudEnabled) {
-    getDoc(doc(db, PLAYERS_COLLECTION, username)).then((docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        const cloudStats = {
-          ...stats,
-          ...data,
-          totalCorrect: Number(data.totalCorrect) || stats.totalCorrect,
-          badges: getBadgeDefinitions(Number(data.totalCorrect) || stats.totalCorrect)
-        };
-        localStorage.setItem(localKey, JSON.stringify(cloudStats));
-      }
-    }).catch((err: any) => {
-      if (err.code === 'permission-denied') cloudEnabled = false;
-    });
+    return null;
+  } catch (err: any) {
+    console.error("MathGenius: Error loading stats", err);
+    return null;
   }
-  return stats;
 };
 
-export const registerNewPlayer = async (username: string): Promise<void> => {
-  if (!username || !cloudEnabled) return;
-  setDoc(doc(db, PLAYERS_COLLECTION, username), getInitialStats(username), { merge: true }).catch((err: any) => {
-    if (err.code === 'permission-denied') cloudEnabled = false;
-  });
+export const createOrUpdatePlayerProfile = async (uid: string, email: string, displayName: string): Promise<void> => {
+  try {
+    const docRef = doc(db, USERS_COLLECTION, uid);
+    const docSnap = await getDoc(docRef);
+    
+    if (!docSnap.exists()) {
+      const initial = getInitialStats(uid, email, displayName);
+      await setDoc(docRef, initial);
+    } else {
+      await setDoc(docRef, { 
+        displayName, 
+        email,
+        uid,
+        lastActive: new Date().toISOString()
+      }, { merge: true });
+    }
+  } catch (err: any) {
+    console.error("MathGenius: Failed to sync profile", err.message);
+  }
 };
 
-export const updateUserStats = async (result: GameResult, username: string): Promise<UserStats> => {
+export const updateUserStats = async (result: GameResult, uid: string): Promise<UserStats> => {
   const today = getTodayDateString();
   const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-  const localKey = `stats_${username}`;
-  const localData = localStorage.getItem(localKey);
-  const currentStats: UserStats = localData ? JSON.parse(localData) : getInitialStats(username);
   
-  let newStreak = currentStats.streak;
-  if (currentStats.lastPlayedDate !== today) {
-    newStreak = currentStats.lastPlayedDate === yesterday ? currentStats.streak + 1 : 1;
+  const currentStats = await loadStats(uid);
+  const baseStats = currentStats || getInitialStats(uid, '', '');
+
+  let newStreak = baseStats.streak;
+  if (baseStats.lastPlayedDate !== today) {
+    newStreak = baseStats.lastPlayedDate === yesterday ? baseStats.streak + 1 : 1;
   }
 
-  const newTotalCorrect = currentStats.totalCorrect + result.score;
+  const addedCorrect = result.score;
+  const addedIncorrect = result.totalQuestions - result.score;
+  const newTotalCorrect = baseStats.totalCorrect + addedCorrect;
+  const newTotalIncorrect = baseStats.totalIncorrect + addedIncorrect;
+  
   const historyKey = `dailyHistory.${today}`;
   const dailyUpdate = {
     date: today,
-    correct: (currentStats.dailyHistory[today]?.correct || 0) + result.score,
-    incorrect: (currentStats.dailyHistory[today]?.incorrect || 0) + (result.totalQuestions - result.score)
+    correct: (baseStats.dailyHistory?.[today]?.correct || 0) + addedCorrect,
+    incorrect: (baseStats.dailyHistory?.[today]?.incorrect || 0) + addedIncorrect
   };
 
-  const updatedStats: UserStats = {
-    ...currentStats,
+  const currentBadges = getBadgeDefinitions(newTotalCorrect);
+  const newBadgesCount = currentBadges.filter(b => b.unlocked).length;
+  const nowIso = new Date().toISOString();
+
+  const cloudPayload: any = {
+    totalCorrect: increment(addedCorrect),
+    totalIncorrect: increment(addedIncorrect),
+    lastPlayedDate: today,
+    lastActive: nowIso,
+    streak: newStreak,
+    [historyKey]: dailyUpdate,
+    badgesCount: newBadgesCount,
+    badges: currentBadges
+  };
+
+  try {
+    await setDoc(doc(db, USERS_COLLECTION, uid), cloudPayload, { merge: true });
+  } catch (err: any) {
+    console.error("MathGenius: Failed to update stats", err.message);
+  }
+  
+  return {
+    ...baseStats,
     totalCorrect: newTotalCorrect,
-    totalIncorrect: currentStats.totalIncorrect + (result.totalQuestions - result.score),
+    totalIncorrect: newTotalIncorrect,
     streak: newStreak,
     lastPlayedDate: today,
-    badges: getBadgeDefinitions(newTotalCorrect),
-    dailyHistory: { ...currentStats.dailyHistory, [today]: dailyUpdate }
+    lastActive: nowIso,
+    dailyHistory: { ...baseStats.dailyHistory, [today]: dailyUpdate },
+    badges: currentBadges,
+    badgesCount: newBadgesCount
   };
-
-  localStorage.setItem(localKey, JSON.stringify(updatedStats));
-
-  if (cloudEnabled) {
-    const updates: any = {
-      totalCorrect: increment(result.score),
-      totalIncorrect: increment(result.totalQuestions - result.score),
-      lastPlayedDate: today,
-      streak: newStreak,
-      [historyKey]: dailyUpdate
-    };
-    updateDoc(doc(db, PLAYERS_COLLECTION, username), updates).catch((err: any) => {
-      if (err.code === 'permission-denied') cloudEnabled = false;
-    });
-  }
-  return updatedStats;
-};
-
-export const getLeaderboard = async (): Promise<LeaderboardEntry[]> => {
-  if (!cloudEnabled) {
-    const saved = localStorage.getItem('mathGeniusUserData');
-    if (saved) {
-        const user = JSON.parse(saved);
-        const entry = getLocalLeaderboardEntry(user.name);
-        return entry ? [entry] : [];
-    }
-    return [];
-  }
-  try {
-    const q = query(collection(db, PLAYERS_COLLECTION), orderBy("totalCorrect", "desc"));
-    const querySnapshot = await getDocs(q);
-    const leaders: LeaderboardEntry[] = [];
-    querySnapshot.forEach((doc) => {
-      const data = doc.data();
-      leaders.push({
-        name: doc.id,
-        displayName: data.displayName || doc.id,
-        totalCorrect: Number(data.totalCorrect) || 0,
-        badgesCount: getBadgeDefinitions(Number(data.totalCorrect) || 0).filter(b => b.unlocked).length,
-        lastActive: data.lastPlayedDate || 'جديد'
-      });
-    });
-    return leaders;
-  } catch (err: any) {
-    if (err.code === 'permission-denied') cloudEnabled = false;
-    return [];
-  }
 };
 
 export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => void) => {
-  if (!cloudEnabled) {
-      const saved = localStorage.getItem('mathGeniusUserData');
-      if (saved) {
-          const user = JSON.parse(saved);
-          const entry = getLocalLeaderboardEntry(user.name);
-          callback(entry ? [entry] : []);
-      } else {
-          callback([]);
-      }
-      return () => {};
-  }
-  const q = query(collection(db, PLAYERS_COLLECTION), orderBy("totalCorrect", "desc"));
+  const q = query(collection(db, USERS_COLLECTION), orderBy("totalCorrect", "desc"));
   return onSnapshot(q, (snapshot) => {
     const leaders: LeaderboardEntry[] = [];
     snapshot.forEach((doc) => {
       const data = doc.data();
-      leaders.push({
-        name: doc.id,
-        displayName: data.displayName || doc.id,
-        totalCorrect: Number(data.totalCorrect) || 0,
-        badgesCount: getBadgeDefinitions(Number(data.totalCorrect) || 0).filter(b => b.unlocked).length,
-        lastActive: data.lastPlayedDate || 'جديد'
-      });
+      // Filter out any documents that don't have real play data
+      if (data.totalCorrect !== undefined && data.totalCorrect > 0) {
+          leaders.push({
+            uid: doc.id,
+            displayName: data.displayName || 'لاعب مجهول',
+            totalCorrect: Number(data.totalCorrect) || 0,
+            badgesCount: Number(data.badgesCount) || 0,
+            lastActive: data.lastPlayedDate || 'جديد'
+          });
+      }
     });
     callback(leaders);
-  }, (err: any) => {
-    if (err.code === 'permission-denied') {
-        cloudEnabled = false;
-        const saved = localStorage.getItem('mathGeniusUserData');
-        if (saved) {
-            const user = JSON.parse(saved);
-            const entry = getLocalLeaderboardEntry(user.name);
-            callback(entry ? [entry] : []);
-        } else {
-            callback([]);
-        }
-    }
   });
 };
 
-export const isCloudEnabled = () => cloudEnabled;
+export const isCloudEnabled = () => true;
 
 export const getLast7DaysStats = (stats: UserStats) => {
   const days = [];
@@ -246,5 +196,3 @@ export const getLast7DaysStats = (stats: UserStats) => {
   }
   return days;
 };
-
-export const getBadgeStatus = (totalCorrect: number) => getBadgeDefinitions(totalCorrect);
