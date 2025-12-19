@@ -43,9 +43,9 @@ isSupported().then(supported => {
 const USERS_COLLECTION = 'users';
 const TEACHERS_COLLECTION = 'Teachers'; 
 
+// استخدام window.location.origin لضمان صحة الرابط دائماً
 const actionCodeSettings = {
-  // تم تغيير الرابط ليكون الصفحة الرئيسية لتجنب خطأ 404
-  url: 'https://abeer-stzj-new.vercel.app/',
+  url: window.location.origin + '/',
   handleCodeInApp: true
 };
 
