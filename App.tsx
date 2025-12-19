@@ -40,6 +40,7 @@ const App: React.FC = () => {
                 isLinkSigningIn.current = false;
             }
         } else {
+          // التحقق من الجلسة المحفوظة
           setIsAuthChecking(false);
         }
     };
@@ -56,31 +57,32 @@ const App: React.FC = () => {
       if (user) {
         setIsAuthChecking(true);
         
-        // جلب البيانات الأولية فوراً
-        let profile = await loadStats(user.uid);
+        // محاولة جلب البيانات مباشرة لتقليل وقت الانتظار
+        const profile = await loadStats(user.uid);
         
         if (!profile) {
             const isTeacher = await isTeacherByEmail(user.email || '');
             if (!isTeacher) {
                 await createOrUpdatePlayerProfile(user.uid, user.email || '', user.displayName || '');
-                profile = await loadStats(user.uid);
             }
+        } else {
+            setCurrentUserData(profile);
+            setIsAuthChecking(false);
         }
         
-        // تحديث الحالة بالبيانات الأولية لإنهاء حالة "جاري المزامنة" مبكراً
-        if (profile) {
-          setCurrentUserData(profile);
-          setIsAuthChecking(false);
-        }
-        
-        // بدء الاشتراك للتحديثات الحية في الخلفية
+        // بدء الاشتراك للتحديثات الحية
         userSubUnsubscribe = subscribeToUserStats(user.uid, (data) => {
-          setCurrentUserData(data);
-          setIsAuthChecking(false); // ضمان إيقاف التحميل عند وصول أول تحديث
+          if (data) {
+            setCurrentUserData(data);
+            setIsAuthChecking(false);
+          }
         });
 
-        // مهلة أمان لإنهاء حالة التحميل بعد 5 ثوانٍ كحد أقصى
-        setTimeout(() => setIsAuthChecking(false), 5000);
+        // مهلة أمان لإنهاء حالة التحميل حتى لو فشل Firestore في الرد
+        const timer = setTimeout(() => {
+            if (isAuthChecking) setIsAuthChecking(false);
+        }, 5000);
+        return () => clearTimeout(timer);
       } else {
         setCurrentUserData(null);
         userSubUnsubscribe();
@@ -111,7 +113,11 @@ const App: React.FC = () => {
     setIsSaving(true);
     setGameResult(result);
     if (currentUser && currentUserData?.role === UserRole.STUDENT) {
-        await updateUserStats(result, currentUser.uid);
+        try {
+            await updateUserStats(result, currentUser.uid);
+        } catch (e) {
+            console.error("Failed to save stats:", e);
+        }
     }
     setIsSaving(false);
     setAppState(AppState.RESULTS);

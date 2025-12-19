@@ -16,7 +16,16 @@ import {
   limit,
   serverTimestamp
 } from 'firebase/firestore';
-import { getAuth, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink, signOut, User } from 'firebase/auth';
+import { 
+  getAuth, 
+  sendSignInLinkToEmail, 
+  isSignInWithEmailLink, 
+  signInWithEmailLink, 
+  signOut, 
+  User,
+  setPersistence,
+  browserLocalPersistence
+} from 'firebase/auth';
 import { getAnalytics, isSupported } from 'firebase/analytics';
 import { UserStats, GameResult, LeaderboardEntry, Badge, UserRole, TeacherProfile } from '../types';
 
@@ -33,6 +42,9 @@ const firebaseConfig = {
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const db = getFirestore(app);
 export const auth = getAuth(app);
+
+// تأكيد حفظ الجلسة محلياً
+setPersistence(auth, browserLocalPersistence).catch(console.error);
 
 isSupported().then(supported => {
   if (supported) {
@@ -74,7 +86,6 @@ export const completeSignInWithLink = async (): Promise<User> => {
   if (!email) throw new Error("البريد الإلكتروني مطلوب لإكمال العملية.");
 
   const cleanEmail = email.trim().toLowerCase();
-  
   const result = await signInWithEmailLink(auth, cleanEmail, window.location.href);
   window.localStorage.removeItem('emailForSignIn');
 
@@ -123,9 +134,8 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
       return { ...docData, teacherId: tSnap.docs[0].id, role: UserRole.TEACHER } as TeacherProfile;
     }
   } catch (error) {
-    console.error("Error in loadStats:", error);
+    console.error("Error loading stats:", error);
   }
-  
   return null;
 };
 
@@ -147,7 +157,7 @@ export const fetchTeacherInfo = async (teacherId: string): Promise<TeacherProfil
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) return { ...docSnap.data(), teacherId: docSnap.id, role: UserRole.TEACHER } as TeacherProfile;
   } catch (error) {
-    console.error("Error in fetchTeacherInfo:", error);
+    console.error("Error fetching teacher info:", error);
   }
   return null;
 };
@@ -177,7 +187,7 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
         }
     }
   }, (error) => {
-    console.error("Snapshot error:", error);
+    console.error("Subscription error:", error);
   });
 };
 
@@ -207,9 +217,7 @@ export const updateUserStats = async (result: GameResult, uid: string) => {
     const today = getLocalDateString();
     const userRef = doc(db, USERS_COLLECTION, uid);
     
-    // محاولة جلب البيانات الحالية
     let snap = await getDoc(userRef);
-    
     if (!snap.exists()) {
         const user = auth.currentUser;
         if (user) {
@@ -232,14 +240,18 @@ export const updateUserStats = async (result: GameResult, uid: string) => {
     const totalCorrectNow = (data.totalCorrect || 0) + result.score;
     const badgesCount = getBadgeDefinitions(totalCorrectNow).filter(b => b.unlocked).length;
 
-    await updateDoc(userRef, {
+    // استخدام setDoc مع merge بدلاً من updateDoc لضمان الحفظ حتى لو كانت هناك مشاكل في المستند
+    await setDoc(userRef, {
         totalCorrect: increment(result.score),
         totalIncorrect: increment(result.totalQuestions - result.score),
         lastActive: new Date().toISOString(),
         lastPlayedDate: today,
         badgesCount: badgesCount,
-        [`dailyHistory.${today}`]: todayStats
-    });
+        dailyHistory: {
+            ...dailyHistory,
+            [today]: todayStats
+        }
+    }, { merge: true });
 };
 
 export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => void, teacherId?: string) => {
