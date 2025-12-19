@@ -41,7 +41,7 @@ isSupported().then(supported => {
 });
 
 const USERS_COLLECTION = 'users';
-const TEACHERS_COLLECTION = 'allowedTeachers'; // تأكد أن هذا هو اسم المجموعة في Firestore
+const TEACHERS_COLLECTION = 'Teachers'; // تم التغيير ليتطابق مع طلبك
 
 const actionCodeSettings = {
   url: 'https://abeer-stzj-new.vercel.app/finish-signin',
@@ -58,8 +58,8 @@ const getLocalDateString = (date: Date = new Date()): string => {
 export const sendTeacherSignInLink = async (email: string) => {
   const cleanEmail = email.trim().toLowerCase();
   
-  // ملاحظة: لا نتحقق منFirestore هنا لأن المستخدم لم يسجل دخوله بعد (تجنباً لخطأ الصلاحيات)
-  // التحقق سيتم لاحقاً عند الضغط على الرابط
+  // لا نقوم بالتحقق من Firestore هنا لأن المستخدم غير مسجل دخوله حالياً
+  // وسيؤدي ذلك لخطأ Missing permissions إذا كانت القواعد تمنع القراءة العامة
   await sendSignInLinkToEmail(auth, cleanEmail, actionCodeSettings);
   window.localStorage.setItem('emailForSignIn', cleanEmail);
 };
@@ -78,22 +78,21 @@ export const completeSignInWithLink = async (): Promise<User> => {
 
   const cleanEmail = email.trim().toLowerCase();
   
-  // 1. تسجيل الدخول أولاً (أصبح المستخدم الآن Authenticated)
+  // 1. تسجيل الدخول أولاً ليصبح المستخدم معرّفاً (Authenticated)
   const result = await signInWithEmailLink(auth, cleanEmail, window.location.href);
   window.localStorage.removeItem('emailForSignIn');
 
   if (result.user) {
-    // 2. الآن نتحقق من الصلاحيات في Firestore لأننا نملك Auth Token
+    // 2. التحقق من السجل في مجموعة Teachers باستخدام البريد الإلكتروني كمعرف للوثيقة
     const teacherDocRef = doc(db, TEACHERS_COLLECTION, cleanEmail);
     const snap = await getDoc(teacherDocRef);
 
     if (!snap.exists()) {
-        // إذا لم يكن معلماً مصرحاً له، نقوم بتسجيل الخروج فوراً
         await signOut(auth);
         throw new Error("عذراً، هذا البريد غير مسجل كمعلم مصرح له في النظام.");
     }
 
-    // 3. تحديث البيانات (هذا سينجح لأن المستخدم مسجل دخوله)
+    // 3. تحديث السجل برقم الـ UID الجديد
     await updateDoc(teacherDocRef, { 
         uid: result.user.uid, 
         lastLogin: serverTimestamp(),
@@ -148,9 +147,14 @@ export const fetchTeacherInfo = async (teacherId: string): Promise<TeacherProfil
 };
 
 export const fetchAllTeachers = async (): Promise<TeacherProfile[]> => {
-  const q = query(collection(db, TEACHERS_COLLECTION), where("active", "==", true));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ ...doc.data(), teacherId: doc.id })) as any;
+  try {
+    const q = query(collection(db, TEACHERS_COLLECTION), where("active", "==", true));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({ ...doc.data(), teacherId: doc.id })) as any;
+  } catch (error) {
+    console.error("Error fetching teachers:", error);
+    return [];
+  }
 };
 
 export const subscribeToUserStats = (uid: string, callback: (stats: any) => void) => {
