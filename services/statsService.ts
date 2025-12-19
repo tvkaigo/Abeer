@@ -262,19 +262,17 @@ export const updateUserStats = async (result: GameResult, uid: string) => {
 };
 
 export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => void, teacherId?: string) => {
-  let q;
-  if (teacherId && teacherId !== 'none') {
-    // الطريقة التي اقترحتها صحيحة ومفيدة جداً للفلترة
-    // الاستعلام يطلب الطلاب المرتبطين بالمعلم فقط، مرتبين تنازلياً حسب النقاط
-    q = query(
-      collection(db, USERS_COLLECTION), 
-      where("teacherId", "==", teacherId), 
-      orderBy("totalCorrect", "desc")
-    );
-  } else {
-    // في حال عدم وجود معلم (أو الترتيب العالمي)، نعرض أفضل 50 عالمياً
-    q = query(collection(db, USERS_COLLECTION), orderBy("totalCorrect", "desc"), limit(50));
+  if (!teacherId || teacherId === 'none') {
+    // إذا لم يتوفر كود المعلم، نرجع مصفوفة فارغة فوراً لضمان الخصوصية
+    callback([]);
+    return () => {};
   }
+
+  const q = query(
+    collection(db, USERS_COLLECTION), 
+    where("teacherId", "==", teacherId), 
+    orderBy("totalCorrect", "desc")
+  );
 
   return onSnapshot(q, (snapshot) => {
     const leaders = snapshot.docs.map(doc => {
@@ -285,12 +283,14 @@ export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => v
         role: data.role || UserRole.STUDENT,
         totalCorrect: data.totalCorrect || 0,
         badgesCount: data.badgesCount || 0,
-        lastActive: data.lastActive || ''
+        lastActive: data.lastActive || '',
+        teacherId: data.teacherId // ضروري للفلترة البرمجية في المتصفح
       };
     });
     callback(leaders as any);
   }, (error) => {
     console.error("Leaderboard subscription error:", error);
+    callback([]);
   });
 };
 

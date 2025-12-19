@@ -1,3 +1,4 @@
+
 export enum Difficulty {
   BEGINNER = 'مبتدئ',
   INTERMEDIATE = 'متوسط',
@@ -102,6 +103,7 @@ export interface LeaderboardEntry {
   totalCorrect: number;
   badgesCount: number;
   lastActive: string;
+  teacherId?: string; // أضيفت للفلترة المتقدمة
 }
 
 export const getUserDisplayName = (userName: string): string => {

@@ -34,12 +34,10 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                     const tid = student.teacherId || 'none';
                     setTeacherId(tid);
                     if (tid !== 'none') {
-                        // استخدام fetchTeacherInfo لأننا نبحث بمعرف المستند (الإيميل)
                         const tData = await fetchTeacherInfo(tid);
                         if (tData) setTeacherName(tData.displayName);
                     }
                 } else if (data.role === UserRole.TEACHER) {
-                    // إذا كان المستخدم معلماً، يعرض طلابه هو
                     setTeacherId(data.teacherId);
                     setTeacherName(data.displayName);
                 }
@@ -56,20 +54,24 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
 
   useEffect(() => {
     if (isResolvingContext || teacherId === null) return;
-    
+
     if (teacherId === 'none') {
-        setLeaders([]);
-        setIsLoading(false);
-        return;
+      setLeaders([]);
+      setIsLoading(false);
+      return;
     }
 
     // الاشتراك في التحديثات الحية لبيانات الطلاب المرتبطين بنفس المعلم
     const unsubscribe = subscribeToLeaderboard((data) => {
-      setLeaders(data);
+      setLeaders(
+        data
+          .filter(student => student.teacherId === teacherId) // فلترة إضافية للتأكيد
+          .sort((a, b) => b.totalCorrect - a.totalCorrect) // ترتيب حسب النقاط
+      );
       setIsLoading(false);
       setOffline(!isCloudEnabledValue());
     }, teacherId);
-    
+
     return () => unsubscribe();
   }, [teacherId, isResolvingContext]);
 
