@@ -9,7 +9,6 @@ import UserEntryModal from './components/UserEntryModal';
 import { AppState, GameConfig, GameResult, Question, Difficulty, Operation } from './types';
 import { generateQuestions } from './services/mathService';
 import { updateUserStats, registerNewPlayer, loadStats } from './services/statsService';
-import { Loader2, CloudDownload } from 'lucide-react';
 
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.WELCOME);
@@ -19,7 +18,6 @@ const App: React.FC = () => {
   const [highScore, setHighScore] = useState<number>(0);
   const [isNewHighScore, setIsNewHighScore] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [isSyncingProfile, setIsSyncingProfile] = useState(false);
   const [currentTotalScore, setCurrentTotalScore] = useState<number>(0);
   const [timeLimit, setTimeLimit] = useState<number>(120);
 
@@ -30,22 +28,14 @@ const App: React.FC = () => {
     } catch { return null; }
   });
 
+  // Background sync on component mount or user change
   useEffect(() => {
-    const syncUserProfile = async () => {
-      if (userData?.name) {
-        setIsSyncingProfile(true);
-        try {
-          const stats = await loadStats(userData.name);
+    if (userData?.name) {
+      loadStats(userData.name).then(stats => {
           setCurrentTotalScore(stats.totalCorrect);
-          await registerNewPlayer(userData.name);
-        } catch (err) {
-          console.error("Profile sync error", err);
-        } finally {
-          setTimeout(() => setIsSyncingProfile(false), 800);
-        }
-      }
-    };
-    syncUserProfile();
+      }).catch(() => {});
+      registerNewPlayer(userData.name).catch(() => {});
+    }
   }, [userData?.name]); 
 
   useEffect(() => {
@@ -53,7 +43,7 @@ const App: React.FC = () => {
     if (savedScore) setHighScore(parseInt(savedScore, 10));
   }, []);
 
-  const handleUserEntry = async (name: string) => {
+  const handleUserEntry = (name: string) => {
     const data = { name };
     setUserData(data);
     localStorage.setItem('mathGeniusUserData', JSON.stringify(data));
@@ -78,23 +68,30 @@ const App: React.FC = () => {
     setIsSaving(true);
     setGameResult(result);
     
-    if (userData) {
-        try {
-            const stats = await updateUserStats(result, userData.name);
-            setCurrentTotalScore(stats.totalCorrect);
-        } catch (e) { console.error("Cloud update error", e); }
-    }
+    try {
+        if (userData) {
+            // FIRE AND FORGET: Update local immediately, let cloud happen in background
+            updateUserStats(result, userData.name).then(stats => {
+                setCurrentTotalScore(stats.totalCorrect);
+            }).catch(() => {});
+        }
 
-    if (result.score > highScore) {
-      setHighScore(result.score);
-      setIsNewHighScore(true);
-      localStorage.setItem('mathGeniusHighScore', result.score.toString());
-    } else {
-      setIsNewHighScore(false);
+        if (result.score > highScore) {
+            setHighScore(result.score);
+            setIsNewHighScore(true);
+            localStorage.setItem('mathGeniusHighScore', result.score.toString());
+        } else {
+            setIsNewHighScore(false);
+        }
+    } catch (e) {
+        console.warn("Local storage update failed", e);
+    } finally {
+        // Instant transition to result screen (no waiting for Firebase)
+        setTimeout(() => {
+            setIsSaving(false);
+            setAppState(AppState.RESULTS);
+        }, 300);
     }
-    
-    setIsSaving(false);
-    setAppState(AppState.RESULTS);
   };
 
   const handleRestart = () => {
@@ -102,21 +99,6 @@ const App: React.FC = () => {
     setGameResult(null);
     setIsNewHighScore(false);
   };
-
-  if (isSyncingProfile) {
-    return (
-        <div className="min-h-screen bg-indigo-50 flex flex-col items-center justify-center p-4">
-            <div className="bg-white/80 backdrop-blur-md p-8 rounded-3xl shadow-xl flex flex-col items-center animate-pop-in">
-                <CloudDownload size={64} className="text-indigo-600 mb-4 animate-bounce" />
-                <h2 className="text-xl font-bold text-indigo-900 mb-2 text-center">جاري استعادة بياناتك...</h2>
-                <div className="flex items-center gap-2 text-gray-500 text-sm">
-                    <Loader2 size={16} className="animate-spin" />
-                    <span>نبحث عن نقاطك في السحابة</span>
-                </div>
-            </div>
-        </div>
-    );
-  }
 
   return (
     <div className="min-h-screen text-slate-800 font-sans">
