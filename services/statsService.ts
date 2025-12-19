@@ -43,7 +43,6 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const db = getFirestore(app);
 export const auth = getAuth(app);
 
-// تأكيد حفظ الجلسة محلياً لضمان عدم إعادة تسجيل الدخول في كل مرة
 setPersistence(auth, browserLocalPersistence).catch(console.error);
 
 isSupported().then(supported => {
@@ -52,7 +51,6 @@ isSupported().then(supported => {
   }
 });
 
-// ملاحظة: تم تعديل اسم المجموعة إلى 'Users' بطلب من المستخدم
 const USERS_COLLECTION = 'Users'; 
 const TEACHERS_COLLECTION = 'Teachers'; 
 
@@ -81,7 +79,7 @@ export const completeSignInWithLink = async (): Promise<User> => {
   
   let email = window.localStorage.getItem('emailForSignIn');
   if (!email) {
-    email = window.prompt('يرجى إدخل بريدك الإلكتروني للتأكيد:');
+    email = window.prompt('يرجى إدخال بريدك الإلكتروني للتأكيد:');
   }
   
   if (!email) throw new Error("البريد الإلكتروني مطلوب لإكمال العملية.");
@@ -266,8 +264,15 @@ export const updateUserStats = async (result: GameResult, uid: string) => {
 export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => void, teacherId?: string) => {
   let q;
   if (teacherId && teacherId !== 'none') {
-    q = query(collection(db, USERS_COLLECTION), where("teacherId", "==", teacherId), orderBy("totalCorrect", "desc"));
+    // الطريقة التي اقترحتها صحيحة ومفيدة جداً للفلترة
+    // قمنا بدمجها مع onSnapshot ليكون العرض حياً وتلقائياً
+    q = query(
+      collection(db, USERS_COLLECTION), 
+      where("teacherId", "==", teacherId), 
+      orderBy("totalCorrect", "desc")
+    );
   } else {
+    // في حال عدم وجود معلم (أو ترتيب عام)، نعرض أفضل 50 عالمياً
     q = query(collection(db, USERS_COLLECTION), orderBy("totalCorrect", "desc"), limit(50));
   }
 
