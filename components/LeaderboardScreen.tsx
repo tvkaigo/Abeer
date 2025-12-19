@@ -61,13 +61,15 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
       return;
     }
 
-    // التأكد من جلب كل الطلاب المرتبطين بنفس المعلم
+    // الاشتراك في بيانات الطلاب المرتبطين بنفس المعلم
     const unsubscribe = subscribeToLeaderboard((data) => {
-      setLeaders(
-        data
-          .filter(student => student.teacherId === teacherId) // فلترة إضافية للتأكيد
-          .sort((a, b) => b.totalCorrect - a.totalCorrect) // ترتيب حسب النقاط
-      );
+      // فلترة إضافية للتأكد أن كل الطلاب مرتبطين بالمعلم
+      const filtered = data.filter(student => student.teacherId === teacherId);
+      
+      // ترتيب حسب النقاط من الأعلى إلى الأقل
+      const sorted = filtered.sort((a, b) => b.totalCorrect - a.totalCorrect);
+      
+      setLeaders(sorted);
       setIsLoading(false);
       setOffline(!isCloudEnabledValue());
     }, teacherId);

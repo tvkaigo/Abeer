@@ -268,6 +268,7 @@ export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => v
     return () => {};
   }
 
+  // استخدام استعلام مفلتر بـ teacherId لضمان الخصوصية وكفاءة جلب البيانات
   const q = query(
     collection(db, USERS_COLLECTION),
     where("teacherId", "==", teacherId)
@@ -284,7 +285,7 @@ export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => v
         totalCorrect: data.totalCorrect || 0,
         badgesCount: data.badgesCount || 0,
         lastActive: data.lastActive || '',
-        teacherId: data.teacherId
+        teacherId: data.teacherId // ضروري للفلترة الإضافية في الواجهة
       });
     });
     callback(students);
