@@ -8,7 +8,7 @@ import LeaderboardScreen from './components/LeaderboardScreen';
 import UserEntryModal from './components/UserEntryModal';
 import { AppState, GameConfig, GameResult, Question, Difficulty, Operation, UserStats, UserRole, TeacherProfile } from './types';
 import { generateQuestions } from './services/mathService';
-import { updateUserStats, auth, createOrUpdatePlayerProfile, subscribeToUserStats, checkIsSignInLink, completeSignInWithLink, loadStats } from './services/statsService';
+import { updateUserStats, auth, createOrUpdatePlayerProfile, subscribeToUserStats, checkIsSignInLink, completeSignInWithLink, loadStats, isTeacherByEmail } from './services/statsService';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 
 const App: React.FC = () => {
@@ -26,15 +26,17 @@ const App: React.FC = () => {
   
   useEffect(() => {
     const handleLinkSignIn = async () => {
+        // التحقق مما إذا كان الرابط هو رابط تسجيل دخول (سواء في الرئيسية أو في finish-signin)
         if (checkIsSignInLink()) {
             try {
                 isLinkSigningIn.current = true;
                 setIsAuthChecking(true);
                 await completeSignInWithLink();
-                window.history.replaceState({}, document.title, window.location.origin);
+                // بعد النجاح، التوجه للرئيسية وتنظيف الرابط
+                window.history.replaceState({}, document.title, window.location.origin + '/');
             } catch (error: any) {
                 console.error("خطأ في تسجيل الدخول عبر الرابط:", error);
-                alert("فشل الرابط: " + (error.message || "الرابط غير صالح"));
+                alert(error.message || "الرابط غير صالح");
             } finally {
                 isLinkSigningIn.current = false;
                 setIsAuthChecking(false);
@@ -49,17 +51,20 @@ const App: React.FC = () => {
   useEffect(() => {
     let userSubUnsubscribe: () => void = () => {};
     const authUnsubscribe = onAuthStateChanged(auth, async (user) => {
-      // إذا كان هناك عملية تسجيل دخول بالرابط جارية، نتوقف هنا
       if (isLinkSigningIn.current) return;
 
       setCurrentUser(user);
       if (user) {
-        // نتحقق أولاً هل هو معلم موجود؟
         const existingProfile = await loadStats(user.uid);
         
-        // إذا لم يكن معلماً مسجلاً مسبقاً، ولم يكن مسجلاً في مجموعة الطلاب، نعتبره طالباً جديداً
         if (!existingProfile) {
-             await createOrUpdatePlayerProfile(user.uid, user.email || '', user.displayName || '');
+            // نتحقق من البريد أولاً لنعرف هل هو معلم أم طالب جديد
+            const isTeacher = await isTeacherByEmail(user.email || '');
+            
+            if (!isTeacher) {
+                // فقط إذا لم يكن معلماً، ننشئ له ملف طالب
+                await createOrUpdatePlayerProfile(user.uid, user.email || '', user.displayName || '');
+            }
         }
         
         userSubUnsubscribe = subscribeToUserStats(user.uid, (data) => {
