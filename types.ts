@@ -65,7 +65,7 @@ export interface UserStats {
   uid: string;
   email: string;
   displayName: string;
-  role: UserRole;
+  role: UserRole.STUDENT;
   teacherId?: string; // كود المعلم المرتبط به الطالب
   totalCorrect: number;
   totalIncorrect: number;
