@@ -43,11 +43,11 @@ isSupported().then(supported => {
 const USERS_COLLECTION = 'users';
 const TEACHERS_COLLECTION = 'Teachers';
 
-// جعل الرابط ديناميكياً ليعمل على أي نطاق (Vercel أو غيره)
-const actionCodeSettings = {
-  url: `${window.location.origin}/finish-signin`,
+// إعدادات رابط تسجيل الدخول - الرابط يجب أن يكون مضافاً في نطاقات Firebase Authorized Domains
+const getActionCodeSettings = () => ({
+  url: `${window.location.origin}/`,
   handleCodeInApp: true
-};
+});
 
 const getLocalDateString = (date: Date = new Date()): string => {
   const year = date.getFullYear();
@@ -57,22 +57,23 @@ const getLocalDateString = (date: Date = new Date()): string => {
 };
 
 /**
- * إرسال رابط تسجيل الدخول للمعلم بعد التحقق من وجوده في مجموعة Teachers
+ * إرسال رابط تسجيل الدخول للمعلم بعد التحقق من وجوده ونشاطه في مجموعة Teachers
  */
 export const sendTeacherSignInLink = async (email: string) => {
   const cleanEmail = email.trim().toLowerCase();
   
-  // التحقق من وجود المعلم باستخدام البريد كمعرف للمستند (Document ID)
+  // 1. تحقق من الإيميل في مجموعة المعلمين المسموح لهم
   const docRef = doc(db, TEACHERS_COLLECTION, cleanEmail);
   const snap = await getDoc(docRef);
 
-  if (!snap.exists()) {
+  if (!snap.exists() || !snap.data().active) {
     throw new Error("عذراً، هذا البريد غير مصرح له بالدخول كمعلم.");
   }
   
-  // إرسال الرابط
-  await sendSignInLinkToEmail(auth, cleanEmail, actionCodeSettings);
-  // حفظ البريد محلياً لتسهيل عملية الدخول لاحقاً
+  // 2. إرسال الرابط إذا كان المعلم مسموحاً له
+  await sendSignInLinkToEmail(auth, cleanEmail, getActionCodeSettings());
+  
+  // حفظ البريد محلياً لتسهيل عملية الدخول لاحقاً عند العودة من الرابط
   window.localStorage.setItem('emailForSignIn', cleanEmail);
 };
 
@@ -101,11 +102,12 @@ export const completeSignInWithLink = async (): Promise<User> => {
     const teacherSnap = await getDoc(teacherDocRef);
     
     if (teacherSnap.exists()) {
+      // ربط الـ UID بسجل المعلم وتحديث تاريخ الدخول
       await updateDoc(teacherDocRef, { 
         uid: result.user.uid, 
         linkedAt: serverTimestamp(),
         lastLogin: serverTimestamp(),
-        active: true
+        active: true // التأكد من أنه نشط
       });
     }
   }
