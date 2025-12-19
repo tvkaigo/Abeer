@@ -41,10 +41,11 @@ isSupported().then(supported => {
 });
 
 const USERS_COLLECTION = 'users';
-const TEACHERS_COLLECTION = 'Teachers'; // تم التغيير ليتطابق مع طلبك
+const TEACHERS_COLLECTION = 'Teachers'; 
 
 const actionCodeSettings = {
-  url: 'https://abeer-stzj-new.vercel.app/finish-signin',
+  // تم تغيير الرابط ليكون الصفحة الرئيسية لتجنب خطأ 404
+  url: 'https://abeer-stzj-new.vercel.app/',
   handleCodeInApp: true
 };
 
@@ -57,9 +58,6 @@ const getLocalDateString = (date: Date = new Date()): string => {
 
 export const sendTeacherSignInLink = async (email: string) => {
   const cleanEmail = email.trim().toLowerCase();
-  
-  // لا نقوم بالتحقق من Firestore هنا لأن المستخدم غير مسجل دخوله حالياً
-  // وسيؤدي ذلك لخطأ Missing permissions إذا كانت القواعد تمنع القراءة العامة
   await sendSignInLinkToEmail(auth, cleanEmail, actionCodeSettings);
   window.localStorage.setItem('emailForSignIn', cleanEmail);
 };
@@ -78,12 +76,10 @@ export const completeSignInWithLink = async (): Promise<User> => {
 
   const cleanEmail = email.trim().toLowerCase();
   
-  // 1. تسجيل الدخول أولاً ليصبح المستخدم معرّفاً (Authenticated)
   const result = await signInWithEmailLink(auth, cleanEmail, window.location.href);
   window.localStorage.removeItem('emailForSignIn');
 
   if (result.user) {
-    // 2. التحقق من السجل في مجموعة Teachers باستخدام البريد الإلكتروني كمعرف للوثيقة
     const teacherDocRef = doc(db, TEACHERS_COLLECTION, cleanEmail);
     const snap = await getDoc(teacherDocRef);
 
@@ -92,7 +88,6 @@ export const completeSignInWithLink = async (): Promise<User> => {
         throw new Error("عذراً، هذا البريد غير مسجل كمعلم مصرح له في النظام.");
     }
 
-    // 3. تحديث السجل برقم الـ UID الجديد
     await updateDoc(teacherDocRef, { 
         uid: result.user.uid, 
         lastLogin: serverTimestamp(),
