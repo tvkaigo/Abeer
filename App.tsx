@@ -26,17 +26,16 @@ const App: React.FC = () => {
   
   useEffect(() => {
     const handleLinkSignIn = async () => {
-        // التحقق مما إذا كان الرابط الحالي هو رابط تسجيل دخول (يعمل في أي مسار بما في ذلك finish-signin)
         if (checkIsSignInLink()) {
             try {
                 isLinkSigningIn.current = true;
                 setIsAuthChecking(true);
                 await completeSignInWithLink();
-                // تنظيف الرابط والعودة للمسار الرئيسي لتجنب التكرار
+                // تنظيف الرابط بعد النجاح للعودة للمسار الرئيسي
                 window.history.replaceState({}, document.title, window.location.origin + '/');
             } catch (error: any) {
                 console.error("خطأ في تسجيل الدخول عبر الرابط:", error);
-                alert(error.message || "الرابط غير صالح");
+                alert(error.message || "الرابط غير صالح أو حدث خطأ في الصلاحيات.");
             } finally {
                 isLinkSigningIn.current = false;
                 setIsAuthChecking(false);
@@ -51,25 +50,20 @@ const App: React.FC = () => {
   useEffect(() => {
     let userSubUnsubscribe: () => void = () => {};
     const authUnsubscribe = onAuthStateChanged(auth, async (user) => {
-      // ننتظر حتى تكتمل عملية تسجيل الدخول بالرابط (إن وجدت) وتحديث Firestore أولاً
       if (isLinkSigningIn.current) return;
 
       setCurrentUser(user);
       if (user) {
-        // طباعة الـ UID المطلوبة في الكونسول للتأكد
+        // طباعة UID المطلوبة للتحقق
         console.log("UID:", user.uid);
 
         const existingProfile = await loadStats(user.uid);
         
         if (!existingProfile) {
-            // التحقق هل البريد مسجل كمعلم قبل إنشاء ملف طالب تلقائي
             const isTeacher = await isTeacherByEmail(user.email || '');
-            
             if (!isTeacher) {
                 // طالب جديد
                 await createOrUpdatePlayerProfile(user.uid, user.email || '', user.displayName || '');
-            } else {
-                console.log("تم اكتشاف دخول معلم مسموح له، بانتظار مزامنة البيانات...");
             }
         }
         

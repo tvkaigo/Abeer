@@ -16,7 +16,7 @@ import {
   limit,
   serverTimestamp
 } from 'firebase/firestore';
-import { getAuth, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink, User } from 'firebase/auth';
+import { getAuth, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink, signOut, User } from 'firebase/auth';
 import { getAnalytics, isSupported } from 'firebase/analytics';
 import { UserStats, GameResult, LeaderboardEntry, Badge, UserRole, TeacherProfile } from '../types';
 
@@ -41,10 +41,9 @@ isSupported().then(supported => {
 });
 
 const USERS_COLLECTION = 'users';
-const TEACHERS_COLLECTION = 'allowedTeachers';
+const TEACHERS_COLLECTION = 'allowedTeachers'; // تأكد أن هذا هو اسم المجموعة في Firestore
 
 const actionCodeSettings = {
-  // الرابط الجديد الذي سيتم معالجة تسجيل الدخول فيه
   url: 'https://abeer-stzj-new.vercel.app/finish-signin',
   handleCodeInApp: true
 };
@@ -59,14 +58,8 @@ const getLocalDateString = (date: Date = new Date()): string => {
 export const sendTeacherSignInLink = async (email: string) => {
   const cleanEmail = email.trim().toLowerCase();
   
-  // التحقق من وجود المعلم في مجموعة allowedTeachers
-  const docRef = doc(db, TEACHERS_COLLECTION, cleanEmail);
-  const snap = await getDoc(docRef);
-
-  if (!snap.exists()) {
-    throw new Error("عذراً، هذا البريد غير مسجل كمعلم مصرح له في النظام.");
-  }
-  
+  // ملاحظة: لا نتحقق منFirestore هنا لأن المستخدم لم يسجل دخوله بعد (تجنباً لخطأ الصلاحيات)
+  // التحقق سيتم لاحقاً عند الضغط على الرابط
   await sendSignInLinkToEmail(auth, cleanEmail, actionCodeSettings);
   window.localStorage.setItem('emailForSignIn', cleanEmail);
 };
@@ -84,20 +77,28 @@ export const completeSignInWithLink = async (): Promise<User> => {
   if (!email) throw new Error("البريد الإلكتروني مطلوب لإكمال العملية.");
 
   const cleanEmail = email.trim().toLowerCase();
+  
+  // 1. تسجيل الدخول أولاً (أصبح المستخدم الآن Authenticated)
   const result = await signInWithEmailLink(auth, cleanEmail, window.location.href);
   window.localStorage.removeItem('emailForSignIn');
 
   if (result.user) {
-    // ربط الـ UID بالسجل الموجود في allowedTeachers
+    // 2. الآن نتحقق من الصلاحيات في Firestore لأننا نملك Auth Token
     const teacherDocRef = doc(db, TEACHERS_COLLECTION, cleanEmail);
     const snap = await getDoc(teacherDocRef);
-    if (snap.exists()) {
-        await updateDoc(teacherDocRef, { 
-            uid: result.user.uid, 
-            lastLogin: serverTimestamp(),
-            active: true
-        });
+
+    if (!snap.exists()) {
+        // إذا لم يكن معلماً مصرحاً له، نقوم بتسجيل الخروج فوراً
+        await signOut(auth);
+        throw new Error("عذراً، هذا البريد غير مسجل كمعلم مصرح له في النظام.");
     }
+
+    // 3. تحديث البيانات (هذا سينجح لأن المستخدم مسجل دخوله)
+    await updateDoc(teacherDocRef, { 
+        uid: result.user.uid, 
+        lastLogin: serverTimestamp(),
+        active: true
+    });
   }
   return result.user;
 };
