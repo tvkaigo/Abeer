@@ -80,7 +80,7 @@ export const completeSignInWithLink = async (): Promise<User> => {
   
   let email = window.localStorage.getItem('emailForSignIn');
   if (!email) {
-    email = window.prompt('يرجى إدخال بريدك الإلكتروني للتأكيد:');
+    email = window.prompt('يرجى إدخل بريدك الإلكتروني للتأكيد:');
   }
   
   if (!email) throw new Error("البريد الإلكتروني مطلوب لإكمال العملية.");
@@ -153,7 +153,7 @@ export const isTeacherByEmail = async (email: string): Promise<boolean> => {
 export const fetchTeacherInfo = async (teacherId: string): Promise<TeacherProfile | null> => {
   if (!teacherId) return null;
   try {
-    const docRef = doc(db, TEACHERS_COLLECTION, teacherId.trim().toLowerCase());
+    const docRef = doc(db, TEACHERS_COLLECTION, teacherId.trim());
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) return { ...docSnap.data(), teacherId: docSnap.id, role: UserRole.TEACHER } as TeacherProfile;
   } catch (error) {
@@ -195,7 +195,7 @@ export const createOrUpdatePlayerProfile = async (uid: string, email: string, di
     const studentRef = doc(db, USERS_COLLECTION, uid);
     try {
       const snap = await getDoc(studentRef);
-      const cleanTeacherId = teacherId?.trim().toLowerCase() || '';
+      const cleanTeacherId = teacherId?.trim() || ''; // Use as is (UID)
       
       if (!snap.exists()) {
           await setDoc(studentRef, {
@@ -270,7 +270,7 @@ export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => v
     return () => {};
   }
 
-  const cleanTeacherId = teacherId.trim().toLowerCase();
+  const cleanTeacherId = teacherId.trim(); // Use as is (UID)
 
   // جلب كافة طلاب الفصل بدون حد أقصى (Limit) لضمان ظهور الجميع
   const q = query(

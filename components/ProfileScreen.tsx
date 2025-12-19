@@ -227,7 +227,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, playerData, userI
       {/* Confirmation Modal */}
       {showConfirmModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white rounded-[2.5rem] shadow-2xl p-8 max-w-sm w-full text-center border-4 border-indigo-50 animate-pop-in">
+          <div className="bg-white rounded-[2.5rem] shadow-2xl p-8 max-sm-w-sm w-full text-center border-4 border-indigo-50 animate-pop-in">
             <div className="w-20 h-20 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-6">
                 <HelpCircle size={48} className="animate-pulse" />
             </div>

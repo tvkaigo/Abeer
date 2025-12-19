@@ -1,6 +1,6 @@
 
 import { useEffect, useState } from 'react';
-import { Home, Trophy, Medal, Crown, Sparkles, Loader2, Globe2, CloudOff, UserCheck, Users, AlertCircle, Award } from 'lucide-react';
+import { Home, Trophy, Medal, Crown, Sparkles, Loader2, Globe2, CloudOff, Users, AlertCircle, Award } from 'lucide-react';
 import { subscribeToLeaderboard, getBadgeDefinitions, isCloudEnabledValue, loadStats, fetchTeacherInfo } from '../services/statsService';
 import { LeaderboardEntry, UserRole, UserStats } from '../types';
 
@@ -26,7 +26,6 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
         }
 
         try {
-            // جلب بيانات المستخدم الحالي لتحديد "فصله"
             const data = await loadStats(currentUser);
             if (data) {
                 if (data.role === UserRole.STUDENT) {
@@ -53,7 +52,10 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
   }, [currentUser]);
 
   useEffect(() => {
-    if (isResolvingContext || teacherId === null) return;
+    if (isResolvingContext || !teacherId) {
+      if (!isResolvingContext && !teacherId) setIsLoading(false);
+      return;
+    }
 
     if (teacherId === 'none') {
       setLeaders([]);
@@ -61,22 +63,20 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
       return;
     }
 
-    const cleanTeacherId = teacherId.trim().toLowerCase();
-
-    // الاشتراك في بيانات الطلاب المرتبطين بنفس المعلم
+    // ⚠️ استخدم teacherId كما هو (UID)
     const unsubscribe = subscribeToLeaderboard((data) => {
-      // فلترة إضافية للتأكد أن كل الطلاب مرتبطين بالمعلم (تجنب أي تداخل في Firestore)
-      const filtered = data.filter(student => 
-        student.teacherId && student.teacherId.trim().toLowerCase() === cleanTeacherId
+      const filtered = data.filter(
+        student => student.teacherId === teacherId
       );
-      
-      // ترتيب حسب النقاط من الأعلى إلى الأقل
-      const sorted = filtered.sort((a, b) => b.totalCorrect - a.totalCorrect);
-      
+
+      const sorted = [...filtered].sort(
+        (a, b) => b.totalCorrect - a.totalCorrect
+      );
+
       setLeaders(sorted);
       setIsLoading(false);
       setOffline(!isCloudEnabledValue());
-    }, cleanTeacherId);
+    }, teacherId);
 
     return () => unsubscribe();
   }, [teacherId, isResolvingContext]);
