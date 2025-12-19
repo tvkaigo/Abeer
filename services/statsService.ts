@@ -43,9 +43,9 @@ isSupported().then(supported => {
 const USERS_COLLECTION = 'users';
 const TEACHERS_COLLECTION = 'Teachers';
 
-// إعدادات رابط تسجيل الدخول - الرابط يجب أن يكون مضافاً في نطاقات Firebase Authorized Domains
 const getActionCodeSettings = () => ({
-  url: `${window.location.origin}/`,
+  // استخدام الرابط الحالي لضمان التوافق مع Authorized Domains في Firebase
+  url: window.location.origin + '/',
   handleCodeInApp: true
 });
 
@@ -56,13 +56,10 @@ const getLocalDateString = (date: Date = new Date()): string => {
   return `${year}-${month}-${day}`;
 };
 
-/**
- * إرسال رابط تسجيل الدخول للمعلم بعد التحقق من وجوده ونشاطه في مجموعة Teachers
- */
 export const sendTeacherSignInLink = async (email: string) => {
   const cleanEmail = email.trim().toLowerCase();
   
-  // 1. تحقق من الإيميل في مجموعة المعلمين المسموح لهم
+  // 1. تحقق من الإيميل في مجموعة المعلمين (يجب أن يكون الإيميل هو الـ ID للمستند)
   const docRef = doc(db, TEACHERS_COLLECTION, cleanEmail);
   const snap = await getDoc(docRef);
 
@@ -70,23 +67,17 @@ export const sendTeacherSignInLink = async (email: string) => {
     throw new Error("عذراً، هذا البريد غير مصرح له بالدخول كمعلم.");
   }
   
-  // 2. إرسال الرابط إذا كان المعلم مسموحاً له
+  // 2. إرسال الرابط
   await sendSignInLinkToEmail(auth, cleanEmail, getActionCodeSettings());
-  
-  // حفظ البريد محلياً لتسهيل عملية الدخول لاحقاً عند العودة من الرابط
   window.localStorage.setItem('emailForSignIn', cleanEmail);
 };
 
-/**
- * إكمال تسجيل الدخول عبر الرابط وربط الـ UID بالسجل
- */
 export const completeSignInWithLink = async (): Promise<User> => {
   if (!isSignInWithEmailLink(auth, window.location.href)) {
     throw new Error("الرابط غير صالح أو انتهت صلاحيته.");
   }
   
   let email = window.localStorage.getItem('emailForSignIn');
-  
   if (!email) {
     email = window.prompt('يرجى إدخال بريدك الإلكتروني للتأكيد:');
   }
@@ -98,18 +89,13 @@ export const completeSignInWithLink = async (): Promise<User> => {
   window.localStorage.removeItem('emailForSignIn');
 
   if (result.user) {
+    // 3. ربط الـ UID بسجل المعلم فوراً بعد تسجيل الدخول
     const teacherDocRef = doc(db, TEACHERS_COLLECTION, cleanEmail);
-    const teacherSnap = await getDoc(teacherDocRef);
-    
-    if (teacherSnap.exists()) {
-      // ربط الـ UID بسجل المعلم وتحديث تاريخ الدخول
-      await updateDoc(teacherDocRef, { 
-        uid: result.user.uid, 
-        linkedAt: serverTimestamp(),
-        lastLogin: serverTimestamp(),
-        active: true // التأكد من أنه نشط
-      });
-    }
+    await updateDoc(teacherDocRef, { 
+      uid: result.user.uid, 
+      lastLogin: serverTimestamp(),
+      active: true 
+    });
   }
   return result.user;
 };
@@ -126,6 +112,7 @@ export const getBadgeDefinitions = (totalCorrect: number): Badge[] => [
 export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile | null> => {
   if (!uid) return null;
   
+  // البحث في الطلاب أولاً
   const studentRef = doc(db, USERS_COLLECTION, uid);
   const studentSnap = await getDoc(studentRef);
   if (studentSnap.exists()) {
@@ -133,6 +120,7 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
     return { ...data, uid: studentSnap.id, badges: getBadgeDefinitions(data.totalCorrect || 0) };
   }
   
+  // البحث في المعلمين باستخدام UID
   const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
   const tSnap = await getDocs(q);
   if (!tSnap.empty) {

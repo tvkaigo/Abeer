@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import WelcomeScreen from './components/WelcomeScreen';
 import GameScreen from './components/GameScreen';
 import ResultScreen from './components/ResultScreen';
@@ -22,22 +22,25 @@ const App: React.FC = () => {
   const [currentUserData, setCurrentUserData] = useState<UserStats | TeacherProfile | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
+  const isLinkSigningIn = useRef(false);
   
   useEffect(() => {
     const handleLinkSignIn = async () => {
-        // التحقق مما إذا كان المستخدم قد هبط على صفحة finish-signin أو يحمل رابط تفعيل
         if (checkIsSignInLink()) {
             try {
+                isLinkSigningIn.current = true;
                 setIsAuthChecking(true);
-                const user = await completeSignInWithLink();
-                console.log("تم تسجيل دخول المعلم بنجاح:", user.email);
-                // إعادة توجيه المستخدم للرابط الرئيسي لتنظيف المتصفح من كود الدخول
+                await completeSignInWithLink();
                 window.history.replaceState({}, document.title, window.location.origin);
             } catch (error: any) {
                 console.error("خطأ في تسجيل الدخول عبر الرابط:", error);
                 alert("فشل الرابط: " + (error.message || "الرابط غير صالح"));
+            } finally {
+                isLinkSigningIn.current = false;
                 setIsAuthChecking(false);
             }
+        } else {
+          setIsAuthChecking(false);
         }
     };
     handleLinkSignIn();
@@ -46,12 +49,16 @@ const App: React.FC = () => {
   useEffect(() => {
     let userSubUnsubscribe: () => void = () => {};
     const authUnsubscribe = onAuthStateChanged(auth, async (user) => {
+      // إذا كان هناك عملية تسجيل دخول بالرابط جارية، نتوقف هنا
+      if (isLinkSigningIn.current) return;
+
       setCurrentUser(user);
       if (user) {
         // نتحقق أولاً هل هو معلم موجود؟
         const existingProfile = await loadStats(user.uid);
-        if (!existingProfile || (existingProfile.role !== UserRole.TEACHER)) {
-             // إذا لم يكن معلماً مسجلاً مسبقاً، نعتبره طالباً ونحدث/ننشئ ملفه
+        
+        // إذا لم يكن معلماً مسجلاً مسبقاً، ولم يكن مسجلاً في مجموعة الطلاب، نعتبره طالباً جديداً
+        if (!existingProfile) {
              await createOrUpdatePlayerProfile(user.uid, user.email || '', user.displayName || '');
         }
         
@@ -95,7 +102,12 @@ const App: React.FC = () => {
 
   const handleRestart = () => setAppState(AppState.WELCOME);
 
-  if (isAuthChecking) return <div className="min-h-screen flex items-center justify-center bg-indigo-50 font-bold text-indigo-600">جاري التحقق من الهوية...</div>;
+  if (isAuthChecking) return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-indigo-50 font-bold text-indigo-600 gap-4">
+      <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+      جاري التحقق من الهوية...
+    </div>
+  );
 
   return (
     <div className="min-h-screen text-slate-800 font-sans">
