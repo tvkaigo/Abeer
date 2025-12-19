@@ -1,4 +1,3 @@
-
 export enum Difficulty {
   BEGINNER = 'مبتدئ',
   INTERMEDIATE = 'متوسط',
@@ -11,6 +10,11 @@ export enum Operation {
   MULTIPLICATION = 'ضرب',
   DIVISION = 'قسمة',
   MIXED = 'منوع'
+}
+
+export enum UserRole {
+  STUDENT = 'Student',
+  TEACHER = 'Teacher'
 }
 
 export interface Question {
@@ -61,6 +65,8 @@ export interface UserStats {
   uid: string;
   email: string;
   displayName: string;
+  role: UserRole;
+  teacherId?: string; // كود المعلم المرتبط به الطالب
   totalCorrect: number;
   totalIncorrect: number;
   streak: number;
@@ -71,18 +77,22 @@ export interface UserStats {
   badgesCount: number;
 }
 
+export interface TeacherProfile {
+  teacherId: string; // Document ID
+  email: string;
+  displayName: string;
+  role: UserRole.TEACHER;
+}
+
 export interface LeaderboardEntry {
   uid: string;
   displayName: string;
+  role: UserRole;
   totalCorrect: number;
   badgesCount: number;
   lastActive: string;
 }
 
-/**
- * Helper function to extract a displayable name from a username or email.
- * If the input is an email, it returns the part before the '@' symbol.
- */
 export const getUserDisplayName = (userName: string): string => {
   if (!userName) return '';
   if (userName.includes('@')) {

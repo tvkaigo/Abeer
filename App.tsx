@@ -5,10 +5,10 @@ import ResultScreen from './components/ResultScreen';
 import AnalyticsScreen from './components/AnalyticsScreen';
 import LeaderboardScreen from './components/LeaderboardScreen';
 import UserEntryModal from './components/UserEntryModal';
-import { AppState, GameConfig, GameResult, Question, Difficulty, Operation, UserStats } from './types';
+import { AppState, GameConfig, GameResult, Question, Difficulty, Operation, UserStats, UserRole, TeacherProfile } from './types';
 import { generateQuestions } from './services/mathService';
-import { updateUserStats, loadStats, auth, createOrUpdatePlayerProfile, subscribeToUserStats } from './services/statsService';
-import { onAuthStateChanged, User } from 'firebase/auth';
+import { updateUserStats, auth, createOrUpdatePlayerProfile, subscribeToUserStats } from './services/statsService';
+import { onAuthStateChanged, type User } from 'firebase/auth';
 
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.WELCOME);
@@ -18,27 +18,24 @@ const App: React.FC = () => {
   const [highScore, setHighScore] = useState<number>(0);
   const [isNewHighScore, setIsNewHighScore] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [currentUserStats, setCurrentUserStats] = useState<UserStats | null>(null);
+  const [currentUserData, setCurrentUserData] = useState<UserStats | TeacherProfile | null>(null);
   const [timeLimit, setTimeLimit] = useState<number>(120);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
 
-  // Monitor Auth State and User Data Subscription
   useEffect(() => {
     let userSubUnsubscribe: () => void = () => {};
 
     const authUnsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
       if (user) {
-        // Sync/Create profile in Firestore
-        await createOrUpdatePlayerProfile(user.uid, user.email || '', user.displayName || 'لاعب');
+        await createOrUpdatePlayerProfile(user.uid, user.email || '', user.displayName || '');
         
-        // Subscribe to real-time updates for this user from /Users/{uid}
-        userSubUnsubscribe = subscribeToUserStats(user.uid, (stats) => {
-          setCurrentUserStats(stats);
+        userSubUnsubscribe = subscribeToUserStats(user.uid, (data) => {
+          setCurrentUserData(data);
         });
       } else {
-        setCurrentUserStats(null);
+        setCurrentUserData(null);
         setHighScore(0);
         userSubUnsubscribe();
       }
@@ -71,12 +68,10 @@ const App: React.FC = () => {
     setGameResult(result);
     
     try {
-        if (currentUser) {
-            // يتم حفظ وتحديث كافة الحقول في الفايربيس هنا مباشرة بعد اللعب
+        if (currentUser && currentUserData?.role === UserRole.STUDENT) {
             await updateUserStats(result, currentUser.uid);
         }
 
-        // Track session high score
         if (result.score > highScore) {
             setHighScore(result.score);
             setIsNewHighScore(true);
@@ -121,8 +116,10 @@ const App: React.FC = () => {
                     onShowAnalytics={() => setAppState(AppState.ANALYTICS)}
                     onShowLeaderboard={() => setAppState(AppState.LEADERBOARD)}
                     highScore={highScore}
-                    userName={currentUserStats?.displayName || currentUser.displayName || currentUser.email || ''}
-                    currentTotalScore={currentUserStats?.totalCorrect || 0}
+                    userName={currentUserData?.displayName || currentUser.displayName || currentUser.email || ''}
+                    currentTotalScore={currentUserData?.role === UserRole.STUDENT ? (currentUserData as UserStats).totalCorrect : 0}
+                    role={currentUserData?.role}
+                    teacherId={currentUserData?.role === UserRole.STUDENT ? (currentUserData as UserStats).teacherId : undefined}
                 />
             )}
             
@@ -135,8 +132,8 @@ const App: React.FC = () => {
                     difficulty={currentConfig.difficulty}
                     onRestart={handleRestart} 
                     isNewHighScore={isNewHighScore}
-                    userName={currentUserStats?.displayName || currentUser.displayName || currentUser.email || ''}
-                    totalCumulativeScore={currentUserStats?.totalCorrect || 0}
+                    userName={currentUserData?.displayName || currentUser.displayName || currentUser.email || ''}
+                    totalCumulativeScore={currentUserData?.role === UserRole.STUDENT ? (currentUserData as UserStats).totalCorrect : 0}
                 />
             )}
         </>

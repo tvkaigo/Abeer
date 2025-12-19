@@ -1,12 +1,12 @@
-
-import React, { useState } from 'react';
-import { User, Mail, Lock, LogIn, UserPlus, Loader2, AlertCircle } from 'lucide-react';
-import { auth } from '../services/statsService';
+import React, { useState, useEffect } from 'react';
+import { User, Mail, Lock, LogIn, UserPlus, Loader2, AlertCircle, KeyRound, UserCheck } from 'lucide-react';
+import { auth, createOrUpdatePlayerProfile, fetchAllTeachers } from '../services/statsService';
 import { 
     signInWithEmailAndPassword, 
     createUserWithEmailAndPassword, 
     updateProfile 
 } from 'firebase/auth';
+import { TeacherProfile } from '../types';
 
 interface UserEntryModalProps {
   onSuccess: () => void;
@@ -17,8 +17,21 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [teacherId, setTeacherId] = useState('');
+  const [teachers, setTeachers] = useState<TeacherProfile[]>([]);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isFetchingTeachers, setIsFetchingTeachers] = useState(false);
+
+  useEffect(() => {
+    if (mode === 'signup') {
+        setIsFetchingTeachers(true);
+        fetchAllTeachers().then(list => {
+            setTeachers(list);
+            setIsFetchingTeachers(false);
+        });
+    }
+  }, [mode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,9 +40,16 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
 
     try {
       if (mode === 'signup') {
-        if (!displayName.trim()) throw new Error("يرجى إدخال اسمك بالعربية");
+        const nameToSave = displayName.trim();
+        if (!nameToSave) throw new Error("يرجى إدخال اسمك بالعربية");
+        if (!teacherId) throw new Error("يرجى اختيار معلمك من القائمة");
+        
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        await updateProfile(userCredential.user, { displayName });
+        
+        // Save profile with selected teacherId
+        await createOrUpdatePlayerProfile(userCredential.user.uid, email, nameToSave, teacherId);
+        
+        await updateProfile(userCredential.user, { displayName: nameToSave });
       } else {
         await signInWithEmailAndPassword(auth, email, password);
       }
@@ -55,7 +75,6 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-pop-in">
       <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full border-4 border-indigo-50 relative overflow-hidden">
-        {/* Decorative background */}
         <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
         
         <div className="text-center mb-6">
@@ -68,7 +87,6 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
           </p>
         </div>
 
-        {/* Tabs */}
         <div className="flex bg-gray-100 p-1 rounded-2xl mb-6">
             <button 
                 onClick={() => setMode('login')}
@@ -86,20 +104,52 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {mode === 'signup' && (
-            <div>
-              <label className="block text-gray-700 font-bold mb-1.5 pr-1">الاسم بالكامل (بالعربية)</label>
-              <div className="relative">
-                <input 
-                  type="text"
-                  required
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="مثال: أحمد محمد"
-                  className="w-full px-4 py-3 rounded-xl border-2 border-gray-100 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 focus:bg-white outline-none transition-all pr-10 bg-gray-50"
-                />
-                <User className="absolute right-3 top-3.5 text-gray-400" size={18} />
-              </div>
-            </div>
+            <>
+                <div>
+                  <label className="block text-gray-700 font-bold mb-1.5 pr-1">الاسم بالكامل (بالعربية)</label>
+                  <div className="relative">
+                    <input 
+                      type="text"
+                      required
+                      value={displayName}
+                      onChange={(e) => setDisplayName(e.target.value)}
+                      placeholder="مثال: أحمد محمد"
+                      className="w-full px-4 py-3 rounded-xl border-2 border-gray-100 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 focus:bg-white outline-none transition-all pr-10 bg-gray-50"
+                    />
+                    <User className="absolute right-3 top-3.5 text-gray-400" size={18} />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-gray-700 font-bold mb-1.5 pr-1">اختر معلمك</label>
+                  <div className="relative">
+                    <select
+                      required
+                      value={teacherId}
+                      onChange={(e) => setTeacherId(e.target.value)}
+                      className="w-full px-4 py-3 rounded-xl border-2 border-gray-100 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 focus:bg-white outline-none transition-all pr-10 bg-gray-50 appearance-none"
+                      disabled={isFetchingTeachers}
+                    >
+                      <option value="">-- اختر المعلم --</option>
+                      {teachers.map(t => (
+                          <option key={t.teacherId} value={t.teacherId}>{t.displayName}</option>
+                      ))}
+                    </select>
+                    <UserCheck className="absolute right-3 top-3.5 text-gray-400 pointer-events-none" size={18} />
+                    {isFetchingTeachers && (
+                        <div className="absolute left-10 top-3.5">
+                            <Loader2 className="animate-spin text-indigo-500" size={18} />
+                        </div>
+                    )}
+                  </div>
+                  {teacherId && (
+                      <div className="mt-2 bg-orange-50 border border-orange-100 p-2.5 rounded-xl text-[11px] text-orange-700 font-bold flex items-start gap-2 animate-fade-in">
+                          <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                          <span>تنبيه: لا يمكنك تغيير اسم المعلم لاحقاً، تأكد من اختيار معلمك الصحيح.</span>
+                      </div>
+                  )}
+                </div>
+            </>
           )}
 
           <div>
@@ -143,7 +193,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
 
           <button 
             type="submit"
-            disabled={isLoading}
+            disabled={isLoading || isFetchingTeachers}
             className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 mt-4 disabled:opacity-70 active:scale-95"
           >
             {isLoading ? (
@@ -158,6 +208,4 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
       </div>
     </div>
   );
-};
-
-export default UserEntryModal;
+}; export default UserEntryModal;

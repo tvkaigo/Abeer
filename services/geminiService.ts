@@ -1,13 +1,14 @@
 
-import { GoogleGenAI } from "@google/genai";
+// Fix: Use the standard import without unnecessary spaces and follow strictly the Gemini rules
+import {GoogleGenAI} from "@google/genai";
 import { Question } from "../types";
 
 // Always initialize the client using the API key obtained from process.env.API_KEY.
 // Recommendation: Create the instance right before the API call to ensure use of the correct key.
 
 export const getAiFeedback = async (score: number, history: Question[], difficulty: string): Promise<string> => {
-  // Ensure strict adherence to initialization guidelines
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  // Fix: Ensure strict adherence to initialization guidelines (no spaces in apiKey object)
+  const ai = new GoogleGenAI({apiKey: process.env.API_KEY});
 
   const wrongAnswers = history.filter(q => !q.isCorrect);
   

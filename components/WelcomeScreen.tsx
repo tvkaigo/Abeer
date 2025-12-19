@@ -1,9 +1,8 @@
-
-import React, { useState } from 'react';
-import { Difficulty, Operation, GameConfig } from '../types';
-import { Brain, Calculator, ChevronLeft, Zap, Divide, X as MultiplyIcon, Plus, Minus, Trophy, BarChart3, Timer, Star, LogOut } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Difficulty, Operation, GameConfig, TeacherProfile, UserRole } from '../types';
+import { Brain, Calculator, ChevronLeft, Zap, Divide, X as MultiplyIcon, Plus, Minus, Trophy, BarChart3, Timer, Star, LogOut, UserCheck } from 'lucide-react';
 import { initAudio } from '../services/soundService';
-import { getBadgeDefinitions, auth } from '../services/statsService';
+import { getBadgeDefinitions, auth, fetchTeacherInfo } from '../services/statsService';
 import { signOut } from 'firebase/auth';
 
 interface WelcomeScreenProps {
@@ -14,6 +13,8 @@ interface WelcomeScreenProps {
   highScore: number;
   userName?: string;
   currentTotalScore?: number;
+  role?: UserRole;
+  teacherId?: string;
 }
 
 const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ 
@@ -23,10 +24,19 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
     onShowLeaderboard, 
     highScore, 
     userName,
-    currentTotalScore = 0
+    currentTotalScore = 0,
+    role = UserRole.STUDENT,
+    teacherId
 }) => {
   const [difficulty, setDifficulty] = useState<Difficulty | null>(null);
   const [operation, setOperation] = useState<Operation | null>(null);
+  const [teacher, setTeacher] = useState<TeacherProfile | null>(null);
+
+  useEffect(() => {
+    if (role === UserRole.STUDENT && teacherId) {
+        fetchTeacherInfo(teacherId).then(setTeacher);
+    }
+  }, [role, teacherId]);
 
   const handleStart = () => {
     if (difficulty && operation) {
@@ -44,7 +54,6 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
       signOut(auth);
   };
 
-  // Determine current rank based on total score
   const badges = getBadgeDefinitions(currentTotalScore);
   const currentBadge = [...badges].reverse().find(b => b.unlocked) || badges[0];
   
@@ -54,9 +63,21 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
       {/* High Score Badge */}
       <div className="absolute top-6 left-6 bg-white/80 backdrop-blur-sm px-4 py-2 rounded-2xl shadow-sm border border-indigo-100 flex items-center gap-2 text-indigo-900 font-bold animate-pop-in">
         <Trophy className="text-yellow-500" size={20} />
-        <span className="text-sm">أفضل جولة:</span>
-        <span className="text-xl">{highScore}/10</span>
+        <span className="text-sm font-black">أفضل جولة: {highScore}/10</span>
       </div>
+
+      {/* Teacher Info (Only for Students) */}
+      {role === UserRole.STUDENT && teacher && (
+        <div className="absolute bottom-6 right-6 bg-indigo-600 text-white px-4 py-2 rounded-2xl shadow-lg border border-white/20 flex items-center gap-3 animate-pop-in">
+            <div className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center">
+                <UserCheck size={18} />
+            </div>
+            <div>
+                <div className="text-[10px] opacity-70 font-bold">معلمك:</div>
+                <div className="text-xs font-black">{teacher.displayName}</div>
+            </div>
+        </div>
+      )}
 
       {/* Action Buttons */}
       <div className="absolute top-6 right-6 flex gap-2 animate-pop-in">
