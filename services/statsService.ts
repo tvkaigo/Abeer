@@ -273,14 +273,12 @@ export const updateUserStats = async (result: GameResult, uid: string): Promise<
 export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => void, teacherId?: string) => {
   let q;
   if (teacherId) {
-    // Filter by linked teacher
     q = query(
       collection(db, USERS_COLLECTION), 
       where("teacherId", "==", teacherId),
       orderBy("totalCorrect", "desc")
     );
   } else {
-    // Global leaderboard
     q = query(collection(db, USERS_COLLECTION), orderBy("totalCorrect", "desc"));
   }
 
