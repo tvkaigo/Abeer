@@ -8,7 +8,8 @@ import {
   query, 
   orderBy, 
   increment,
-  onSnapshot
+  onSnapshot,
+  serverTimestamp
 } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { getAnalytics, isSupported } from 'firebase/analytics';
@@ -48,18 +49,19 @@ export const getInitialStats = (uid: string, email: string, displayName: string)
   return {
     uid,
     email,
-    displayName,
+    displayName: displayName || 'لاعب جديد',
     totalCorrect: 0,
     totalIncorrect: 0,
     streak: 0,
     lastPlayedDate: null,
     lastActive: new Date().toISOString(),
-    dailyHistory: {}, // Purely empty, no demo data
+    dailyHistory: {},
     badges: getBadgeDefinitions(0),
     badgesCount: 0
   };
 };
 
+// يحمل البيانات من المسار /Users/{uid}
 export const loadStats = async (uid: string): Promise<UserStats | null> => {
   try {
     const docSnap = await getDoc(doc(db, USERS_COLLECTION, uid));
@@ -81,20 +83,40 @@ export const loadStats = async (uid: string): Promise<UserStats | null> => {
   }
 };
 
+// اشتراك حي لبيانات المستخدم لضمان التحديث التلقائي في كل الصفحات
+export const subscribeToUserStats = (uid: string, callback: (stats: UserStats) => void) => {
+  return onSnapshot(doc(db, USERS_COLLECTION, uid), (docSnap) => {
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      const totalCorrect = Number(data.totalCorrect) || 0;
+      const badges = getBadgeDefinitions(totalCorrect);
+      callback({
+        ...data,
+        uid: docSnap.id,
+        badges,
+        badgesCount: badges.filter(b => b.unlocked).length
+      } as UserStats);
+    }
+  });
+};
+
 export const createOrUpdatePlayerProfile = async (uid: string, email: string, displayName: string): Promise<void> => {
   try {
     const docRef = doc(db, USERS_COLLECTION, uid);
     const docSnap = await getDoc(docRef);
     
+    const nowIso = new Date().toISOString();
+    
     if (!docSnap.exists()) {
       const initial = getInitialStats(uid, email, displayName);
       await setDoc(docRef, initial);
     } else {
+      // تحديث displayName و lastActive عند كل دخول
       await setDoc(docRef, { 
         displayName, 
         email,
         uid,
-        lastActive: new Date().toISOString()
+        lastActive: nowIso
       }, { merge: true });
     }
   } catch (err: any) {
@@ -102,6 +124,7 @@ export const createOrUpdatePlayerProfile = async (uid: string, email: string, di
   }
 };
 
+// تحديث البيانات وحفظها في المسار /Users/{uid} بعد كل جولة لعب
 export const updateUserStats = async (result: GameResult, uid: string): Promise<UserStats> => {
   const today = getTodayDateString();
   const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
@@ -109,6 +132,7 @@ export const updateUserStats = async (result: GameResult, uid: string): Promise<
   const currentStats = await loadStats(uid);
   const baseStats = currentStats || getInitialStats(uid, '', '');
 
+  // حساب الـ streak
   let newStreak = baseStats.streak;
   if (baseStats.lastPlayedDate !== today) {
     newStreak = baseStats.lastPlayedDate === yesterday ? baseStats.streak + 1 : 1;
@@ -117,7 +141,6 @@ export const updateUserStats = async (result: GameResult, uid: string): Promise<
   const addedCorrect = result.score;
   const addedIncorrect = result.totalQuestions - result.score;
   const newTotalCorrect = baseStats.totalCorrect + addedCorrect;
-  const newTotalIncorrect = baseStats.totalIncorrect + addedIncorrect;
   
   const historyKey = `dailyHistory.${today}`;
   const dailyUpdate = {
@@ -130,7 +153,9 @@ export const updateUserStats = async (result: GameResult, uid: string): Promise<
   const newBadgesCount = currentBadges.filter(b => b.unlocked).length;
   const nowIso = new Date().toISOString();
 
+  // تعبئة وتحديث جميع الحقول المطلوبة في Firestore
   const cloudPayload: any = {
+    displayName: baseStats.displayName, // التأكد من وجود الاسم
     totalCorrect: increment(addedCorrect),
     totalIncorrect: increment(addedIncorrect),
     lastPlayedDate: today,
@@ -138,19 +163,20 @@ export const updateUserStats = async (result: GameResult, uid: string): Promise<
     streak: newStreak,
     [historyKey]: dailyUpdate,
     badgesCount: newBadgesCount,
-    badges: currentBadges
+    badges: currentBadges // تخزين مصفوفة الأوسمة كاملة كما طلبت
   };
 
   try {
-    await setDoc(doc(db, USERS_COLLECTION, uid), cloudPayload, { merge: true });
+    const userDocRef = doc(db, USERS_COLLECTION, uid);
+    await setDoc(userDocRef, cloudPayload, { merge: true });
   } catch (err: any) {
-    console.error("MathGenius: Failed to update stats", err.message);
+    console.error("MathGenius: Failed to update stats in Firebase", err.message);
   }
   
   return {
     ...baseStats,
     totalCorrect: newTotalCorrect,
-    totalIncorrect: newTotalIncorrect,
+    totalIncorrect: baseStats.totalIncorrect + addedIncorrect,
     streak: newStreak,
     lastPlayedDate: today,
     lastActive: nowIso,
@@ -166,7 +192,6 @@ export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => v
     const leaders: LeaderboardEntry[] = [];
     snapshot.forEach((doc) => {
       const data = doc.data();
-      // Filter out any documents that don't have real play data
       if (data.totalCorrect !== undefined && data.totalCorrect > 0) {
           leaders.push({
             uid: doc.id,

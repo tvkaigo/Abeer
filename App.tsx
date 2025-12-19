@@ -5,9 +5,9 @@ import ResultScreen from './components/ResultScreen';
 import AnalyticsScreen from './components/AnalyticsScreen';
 import LeaderboardScreen from './components/LeaderboardScreen';
 import UserEntryModal from './components/UserEntryModal';
-import { AppState, GameConfig, GameResult, Question, Difficulty, Operation } from './types';
+import { AppState, GameConfig, GameResult, Question, Difficulty, Operation, UserStats } from './types';
 import { generateQuestions } from './services/mathService';
-import { updateUserStats, loadStats, auth, createOrUpdatePlayerProfile } from './services/statsService';
+import { updateUserStats, loadStats, auth, createOrUpdatePlayerProfile, subscribeToUserStats } from './services/statsService';
 import { onAuthStateChanged, User } from 'firebase/auth';
 
 const App: React.FC = () => {
@@ -18,32 +18,37 @@ const App: React.FC = () => {
   const [highScore, setHighScore] = useState<number>(0);
   const [isNewHighScore, setIsNewHighScore] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [currentTotalScore, setCurrentTotalScore] = useState<number>(0);
+  const [currentUserStats, setCurrentUserStats] = useState<UserStats | null>(null);
   const [timeLimit, setTimeLimit] = useState<number>(120);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
 
-  // Monitor Auth State
+  // Monitor Auth State and User Data Subscription
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    let userSubUnsubscribe: () => void = () => {};
+
+    const authUnsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
       if (user) {
         // Sync/Create profile in Firestore
         await createOrUpdatePlayerProfile(user.uid, user.email || '', user.displayName || 'لاعب');
-        const stats = await loadStats(user.uid);
-        if (stats) {
-          setCurrentTotalScore(stats.totalCorrect);
-          // High score in cloud context is usually handled per session or we can track it.
-          // For now, we'll keep session-based high score tracking for simplicity without demo localstorage.
-        }
+        
+        // Subscribe to real-time updates for this user from /Users/{uid}
+        userSubUnsubscribe = subscribeToUserStats(user.uid, (stats) => {
+          setCurrentUserStats(stats);
+        });
       } else {
-        // Clear session stats on logout
-        setCurrentTotalScore(0);
+        setCurrentUserStats(null);
         setHighScore(0);
+        userSubUnsubscribe();
       }
       setIsAuthChecking(false);
     });
-    return () => unsubscribe();
+
+    return () => {
+      authUnsubscribe();
+      userSubUnsubscribe();
+    };
   }, []);
 
   const handleStartGame = (config: GameConfig) => {
@@ -67,8 +72,8 @@ const App: React.FC = () => {
     
     try {
         if (currentUser) {
-            const stats = await updateUserStats(result, currentUser.uid);
-            setCurrentTotalScore(stats.totalCorrect);
+            // يتم حفظ وتحديث كافة الحقول في الفايربيس هنا مباشرة بعد اللعب
+            await updateUserStats(result, currentUser.uid);
         }
 
         // Track session high score
@@ -116,8 +121,8 @@ const App: React.FC = () => {
                     onShowAnalytics={() => setAppState(AppState.ANALYTICS)}
                     onShowLeaderboard={() => setAppState(AppState.LEADERBOARD)}
                     highScore={highScore}
-                    userName={currentUser.displayName || currentUser.email || ''}
-                    currentTotalScore={currentTotalScore}
+                    userName={currentUserStats?.displayName || currentUser.displayName || currentUser.email || ''}
+                    currentTotalScore={currentUserStats?.totalCorrect || 0}
                 />
             )}
             
@@ -130,8 +135,8 @@ const App: React.FC = () => {
                     difficulty={currentConfig.difficulty}
                     onRestart={handleRestart} 
                     isNewHighScore={isNewHighScore}
-                    userName={currentUser.displayName || currentUser.email || ''}
-                    totalCumulativeScore={currentTotalScore}
+                    userName={currentUserStats?.displayName || currentUser.displayName || currentUser.email || ''}
+                    totalCumulativeScore={currentUserStats?.totalCorrect || 0}
                 />
             )}
         </>
