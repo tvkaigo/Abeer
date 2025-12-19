@@ -56,7 +56,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
 
     try {
       if (mode === 'teacher') {
-        // سيقوم هذا التابع بالتحقق من (active: true) داخلياً
+        // سيقوم هذا التابع بالتحقق من (active: true) داخلياً ويعيد رسالة مخصصة
         await sendTeacherSignInLink(email.trim());
         setLinkSent(true);
       } else if (mode === 'signup') {
@@ -230,7 +230,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
             <div className="bg-purple-50 p-4 rounded-2xl border border-purple-100 flex items-start gap-3 animate-fade-in">
               <AlertCircle size={20} className="text-purple-600 shrink-0 mt-0.5" />
               <p className="text-xs text-purple-800 leading-relaxed font-bold">
-                سيتم التحقق من حالة حسابك أولاً. إذا كنت معلماً نشطاً، سيصلك رابط الدخول الآمن فوراً.
+                سيتم التحقق من حالة حسابك (active). إذا كنت معلماً نشطاً، سيصلك رابط الدخول الآمن.
               </p>
             </div>
           )}

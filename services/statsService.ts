@@ -18,7 +18,7 @@ import {
 } from 'firebase/firestore';
 import { getAuth, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink, User } from 'firebase/auth';
 import { getAnalytics, isSupported } from 'firebase/analytics';
-import { UserStats, GameResult, LeaderboardEntry, Badge, UserRole, TeacherProfile, DailyStat } from '../types';
+import { UserStats, GameResult, LeaderboardEntry, Badge, UserRole, TeacherProfile } from '../types';
 
 const firebaseConfig = {
   apiKey: "AIzaSyAtPiYQgil6zH5TEWx5LsOmNxAAQkuyIIY",
@@ -57,7 +57,7 @@ const getLocalDateString = (date: Date = new Date()): string => {
 };
 
 /**
- * إرسال رابط تسجيل الدخول للمعلم بعد التحقق من وجوده وتفعيله
+ * إرسال رابط تسجيل الدخول للمعلم بعد التحقق من وجوده وتفعيله (active: true)
  */
 export const sendTeacherSignInLink = async (email: string) => {
   const cleanEmail = email.trim().toLowerCase();
@@ -121,6 +121,7 @@ export const getBadgeDefinitions = (totalCorrect: number): Badge[] => [
 export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile | null> => {
   if (!uid) return null;
   
+  // الطلاب
   const studentRef = doc(db, USERS_COLLECTION, uid);
   const studentSnap = await getDoc(studentRef);
   if (studentSnap.exists()) {
@@ -128,6 +129,7 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
     return { ...data, uid: studentSnap.id, badges: getBadgeDefinitions(data.totalCorrect || 0) };
   }
   
+  // المعلمون
   const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
   const tSnap = await getDocs(q);
   if (!tSnap.empty) {

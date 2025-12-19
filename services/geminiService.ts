@@ -1,14 +1,14 @@
 
-// Fix: Use the standard import without unnecessary spaces and follow strictly the Gemini rules
-import {GoogleGenAI} from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { Question } from "../types";
 
-// Always initialize the client using the API key obtained from process.env.API_KEY.
-// Recommendation: Create the instance right before the API call to ensure use of the correct key.
-
+/**
+ * دالة الحصول على تعليقات ذكاء اصطناعي من Gemini
+ * تتبع القواعد الصارمة للمكتبة @google/genai
+ */
 export const getAiFeedback = async (score: number, history: Question[], difficulty: string): Promise<string> => {
-  // Fix: Ensure strict adherence to initialization guidelines (no spaces in apiKey object)
-  const ai = new GoogleGenAI({apiKey: process.env.API_KEY});
+  // استخدام المفتاح حصراً من process.env.API_KEY
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   const wrongAnswers = history.filter(q => !q.isCorrect);
   
@@ -29,14 +29,13 @@ export const getAiFeedback = async (score: number, history: Question[], difficul
   `;
 
   try {
-    // Call generateContent with both the model name and the prompt.
-    // gemini-3-flash-preview is suitable for basic text feedback tasks.
+    // استخدام موديل gemini-3-flash-preview للمهام النصية البسيطة
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: prompt,
     });
     
-    // The text content is directly accessible via the .text property of the response object.
+    // الوصول للخاصية .text مباشرة (ليست دالة)
     return response.text || "أداء رائع! واصل التدريب لتصبح عبقري الرياضيات الأول.";
   } catch (error) {
     console.error("Gemini API Error:", error);

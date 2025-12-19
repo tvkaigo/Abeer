@@ -10,6 +10,8 @@ import { AppState, GameConfig, GameResult, Question, Difficulty, Operation, User
 import { generateQuestions } from './services/mathService';
 import { updateUserStats, auth, createOrUpdatePlayerProfile, subscribeToUserStats, checkIsSignInLink, completeSignInWithLink, loadStats } from './services/statsService';
 import { onAuthStateChanged, type User } from 'firebase/auth';
+// Added missing Loader2 import
+import { Loader2 } from 'lucide-react';
 
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.WELCOME);
@@ -23,19 +25,18 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   
+  // التعامل مع روابط تسجيل الدخول (Email Link Authentication)
   useEffect(() => {
     const handleLinkSignIn = async () => {
-        // التحقق مما إذا كان المستخدم قد هبط على صفحة finish-signin أو يحمل رابط تفعيل
         if (checkIsSignInLink()) {
             try {
                 setIsAuthChecking(true);
-                const user = await completeSignInWithLink();
-                console.log("تم تسجيل دخول المعلم بنجاح:", user.email);
-                // إعادة توجيه المستخدم للرابط الرئيسي لتنظيف المتصفح من كود الدخول
+                await completeSignInWithLink();
+                // تنظيف الرابط من المتصفح
                 window.history.replaceState({}, document.title, window.location.origin);
             } catch (error: any) {
-                console.error("خطأ في تسجيل الدخول عبر الرابط:", error);
-                alert("فشل الرابط: " + (error.message || "الرابط غير صالح"));
+                console.error("Auth Link Error:", error);
+                alert(error.message || "فشل تسجيل الدخول عبر الرابط");
                 setIsAuthChecking(false);
             }
         }
@@ -43,26 +44,31 @@ const App: React.FC = () => {
     handleLinkSignIn();
   }, []);
 
+  // مراقبة حالة تسجيل الدخول والمزامنة مع Firestore
   useEffect(() => {
     let userSubUnsubscribe: () => void = () => {};
     const authUnsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
       if (user) {
-        // نتحقق أولاً هل هو معلم موجود؟
         const existingProfile = await loadStats(user.uid);
-        if (!existingProfile || (existingProfile.role !== UserRole.TEACHER)) {
-             // إذا لم يكن معلماً مسجلاً مسبقاً، نعتبره طالباً ونحدث/ننشئ ملفه
-             await createOrUpdatePlayerProfile(user.uid, user.email || '', user.displayName || '');
+        
+        // إذا كان المستخدم جديداً (ليس معلماً مسجلاً)، نعتبره طالباً وننشئ له ملفاً
+        if (!existingProfile) {
+             await createOrUpdatePlayerProfile(user.uid, user.email || '', user.displayName || 'لاعب جديد');
+        } else if (existingProfile.role !== UserRole.TEACHER && !existingProfile.displayName) {
+             // تحديث الاسم إذا كان مفقوداً للطلاب
+             await createOrUpdatePlayerProfile(user.uid, user.email || '', user.displayName || 'لاعب');
         }
         
         userSubUnsubscribe = subscribeToUserStats(user.uid, (data) => {
           setCurrentUserData(data);
+          setIsAuthChecking(false);
         });
       } else {
         setCurrentUserData(null);
         userSubUnsubscribe();
+        setIsAuthChecking(false);
       }
-      setIsAuthChecking(false);
     });
     return () => {
       authUnsubscribe();
@@ -95,7 +101,12 @@ const App: React.FC = () => {
 
   const handleRestart = () => setAppState(AppState.WELCOME);
 
-  if (isAuthChecking) return <div className="min-h-screen flex items-center justify-center bg-indigo-50 font-bold text-indigo-600">جاري التحقق من الهوية...</div>;
+  if (isAuthChecking) return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-indigo-50 font-sans">
+        <Loader2 className="animate-spin text-indigo-600 mb-4" size={48} />
+        <p className="font-bold text-indigo-600">جاري التحقق من الهوية...</p>
+    </div>
+  );
 
   return (
     <div className="min-h-screen text-slate-800 font-sans">
