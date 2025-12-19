@@ -265,14 +265,14 @@ export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => v
   let q;
   if (teacherId && teacherId !== 'none') {
     // الطريقة التي اقترحتها صحيحة ومفيدة جداً للفلترة
-    // قمنا بدمجها مع onSnapshot ليكون العرض حياً وتلقائياً
+    // الاستعلام يطلب الطلاب المرتبطين بالمعلم فقط، مرتبين تنازلياً حسب النقاط
     q = query(
       collection(db, USERS_COLLECTION), 
       where("teacherId", "==", teacherId), 
       orderBy("totalCorrect", "desc")
     );
   } else {
-    // في حال عدم وجود معلم (أو ترتيب عام)، نعرض أفضل 50 عالمياً
+    // في حال عدم وجود معلم (أو الترتيب العالمي)، نعرض أفضل 50 عالمياً
     q = query(collection(db, USERS_COLLECTION), orderBy("totalCorrect", "desc"), limit(50));
   }
 
@@ -289,6 +289,8 @@ export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => v
       };
     });
     callback(leaders as any);
+  }, (error) => {
+    console.error("Leaderboard subscription error:", error);
   });
 };
 
