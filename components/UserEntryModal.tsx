@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, Mail, Lock, LogIn, UserPlus, Loader2, AlertCircle, UserCheck, ChevronDown, GraduationCap, CheckCircle2, Info } from 'lucide-react';
+import { User, Mail, Lock, LogIn, UserPlus, Loader2, AlertCircle, UserCheck, ChevronDown, GraduationCap, CheckCircle2, Info, Timer } from 'lucide-react';
 import { auth, createOrUpdatePlayerProfile, fetchAllTeachers, sendTeacherSignInLink } from '../services/statsService';
 import { 
     signInWithEmailAndPassword, 
@@ -24,6 +24,26 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isFetchingTeachers, setIsFetchingTeachers] = useState(false);
   const [linkSent, setLinkSent] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+
+  // التحقق من وجود مهلة سابقة عند تحميل المكون
+  useEffect(() => {
+    const lastSend = localStorage.getItem('lastTeacherLinkSend');
+    if (lastSend) {
+      const diff = Math.floor((Date.now() - parseInt(lastSend)) / 1000);
+      if (diff < 60) {
+        setCooldown(60 - diff);
+      }
+    }
+  }, []);
+
+  // إدارة الموقت التنازلي
+  useEffect(() => {
+    if (cooldown > 0) {
+      const timer = setTimeout(() => setCooldown(prev => prev - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [cooldown]);
 
   useEffect(() => {
     if (mode === 'signup') {
@@ -53,13 +73,23 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLoading) return; // منع الإرسال المتكرر أثناء التحميل
+
     setError('');
     setIsLoading(true);
 
     try {
       if (mode === 'teacher') {
+        if (cooldown > 0) {
+          throw new Error(`يرجى الانتظار ${cooldown} ثانية قبل محاولة الإرسال مرة أخرى.`);
+        }
         if (!isValidEmail(email)) throw new Error("يرجى إدخال بريد إلكتروني صحيح");
+        
         await sendTeacherSignInLink(email.trim());
+        
+        // تسجيل وقت الإرسال وبدء المهلة
+        localStorage.setItem('lastTeacherLinkSend', Date.now().toString());
+        setCooldown(60);
         setLinkSent(true);
       } else if (mode === 'signup') {
         const nameToSave = displayName.trim();
@@ -99,10 +129,10 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
             <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6">
                 <CheckCircle2 size={48} />
             </div>
-            <h2 className="text-2xl font-black text-slate-800 mb-4">تم إرسال الرابط!</h2>
+            <h2 className="text-2xl font-black text-slate-800 mb-4">تم إرسال الرابط بنجاح!</h2>
             <p className="text-slate-600 leading-relaxed mb-8">
-                لقد أرسلنا رابط تسجيل دخول آمن إلى <strong>{email}</strong>.
-                يرجى فتح بريدك الإلكتروني والضغط على الرابط لتسجيل الدخول مباشرة.
+                لقد أرسلنا رابط تسجيل دخول آمن إلى <strong>{email}</strong>.<br/><br/>
+                يرجى فتح بريدك الإلكتروني والضغط على الرابط. إذا لم تجده، <strong>تأكد من فحص مجلد الرسائل غير المرغوب فيها (Spam/Junk)</strong>.
             </p>
             <button 
                 onClick={() => setLinkSent(false)}
@@ -246,13 +276,17 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
 
           <button 
             type="submit"
-            disabled={isLoading || (mode === 'signup' && (isFetchingTeachers || teachers.length === 0)) || (mode === 'teacher' && !isValidEmail(email))}
+            disabled={isLoading || cooldown > 0 || (mode === 'signup' && (isFetchingTeachers || teachers.length === 0)) || (mode === 'teacher' && !isValidEmail(email))}
             className={`w-full text-white font-black py-4 rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2 mt-4 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed ${mode === 'teacher' ? 'bg-purple-600 hover:bg-purple-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
           >
             {isLoading ? (
               <Loader2 className="animate-spin" size={24} />
             ) : mode === 'teacher' ? (
-              <>إرسال رابط الدخول <Mail size={20} /></>
+              cooldown > 0 ? (
+                <><Timer size={20} /> إعادة الإرسال ({cooldown})</>
+              ) : (
+                <>إرسال رابط الدخول <Mail size={20} /></>
+              )
             ) : mode === 'login' ? (
               <>دخول الطالب <LogIn size={20} className="rotate-180" /></>
             ) : (

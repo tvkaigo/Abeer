@@ -1,26 +1,25 @@
 
 import React, { useEffect, useState } from 'react';
-import { Home, TrendingUp, Calendar, Award, CheckCircle2, Percent, Loader2, RefreshCw, Trophy, UserCog } from 'lucide-react';
-// Fix: Renamed getLast7DaysStats to getLast7DaysStatsValue to match the export in statsService.ts
+import { Home, TrendingUp, Calendar, Award, CheckCircle2, Percent, Loader2, RefreshCw, Trophy, UserCog, AlertCircle } from 'lucide-react';
 import { loadStats, getLast7DaysStatsValue, subscribeToLeaderboard } from '../services/statsService';
 import { UserStats, LeaderboardEntry, UserRole, TeacherProfile } from '../types';
 
 interface AnalyticsScreenProps {
   onBack: () => void;
-  userName?: string; // This will now receive the UID
+  playerData: UserStats | TeacherProfile | null;
+  userId: string;
 }
 
-const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) => {
-  // Fix: Allow state to hold either UserStats or TeacherProfile to avoid type mismatch with loadStats
-  const [player, setPlayer] = useState<UserStats | TeacherProfile | null>(null);
+const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, playerData, userId }) => {
+  const [player, setPlayer] = useState<UserStats | TeacherProfile | null>(playerData);
   const [rank, setRank] = useState<number | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(!playerData);
 
   const fetchData = async () => {
-    if (userName) {
+    if (userId) {
       setIsLoading(true);
       try {
-        const userData = await loadStats(userName);
+        const userData = await loadStats(userId);
         setPlayer(userData);
       } catch (error) {
         console.error("Error fetching analytics:", error);
@@ -31,25 +30,40 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
   };
 
   useEffect(() => {
-    fetchData();
+    // إذا لم تكن البيانات ممرة مسبقاً، قم بجلبها
+    if (!player) {
+      fetchData();
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    // الاشتراك في قائمة المتصدرين لتحديد الرتبة
+    const tid = player?.role === UserRole.STUDENT ? (player as UserStats).teacherId : undefined;
     
-    // Subscribe to rank changes
     const unsub = subscribeToLeaderboard((leaders) => {
-        const userRank = leaders.findIndex(u => u.uid === userName) + 1;
+        const userRank = leaders.findIndex(u => u.uid === userId) + 1;
         setRank(userRank > 0 ? userRank : null);
-    });
+    }, tid);
     
     return () => unsub();
-  }, [userName]);
+  }, [userId, player]);
 
-  if (isLoading || !player) return (
+  if (isLoading && !player) return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 gap-4">
       <Loader2 size={48} className="text-indigo-600 animate-spin" />
       <p className="text-gray-500 font-bold animate-pulse">جاري مزامنة بيانات البطل...</p>
     </div>
   );
 
-  // Fix: Safely extract student-specific data using role checks
+  if (!player) return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 gap-4 p-6 text-center">
+      <AlertCircle size={48} className="text-red-500" />
+      <h2 className="text-xl font-bold text-slate-800">عذراً، لم نتمكن من العثور على بياناتك</h2>
+      <p className="text-slate-500">يرجى محاولة تسجيل الدخول مرة أخرى أو التحقق من اتصالك.</p>
+      <button onClick={onBack} className="bg-indigo-600 text-white px-6 py-2 rounded-xl font-bold">العودة للرئيسية</button>
+    </div>
+  );
+
   const isStudent = player.role === UserRole.STUDENT;
   const studentData = isStudent ? (player as UserStats) : null;
 
@@ -61,7 +75,6 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
     ? Math.round((totalCorrect / totalAttempts) * 100) 
     : 0;
 
-  // Fix: Updated call to getLast7DaysStatsValue to match exported function name
   const weeklyData = studentData ? getLast7DaysStatsValue(studentData) : [];
   const maxWeeklyValue = Math.max(...weeklyData.map(d => d.correct + d.incorrect), 5);
 
@@ -190,7 +203,7 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, userName }) =
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {studentData.badges.map((badge) => {
+              {(studentData.badges || []).map((badge) => {
                  const progress = Math.min(100, (studentData.totalCorrect / badge.required) * 100);
                  return (
                   <div 
