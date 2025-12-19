@@ -61,7 +61,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
       return;
     }
 
-    // الاشتراك في التحديثات الحية لبيانات الطلاب المرتبطين بنفس المعلم
+    // التأكد من جلب كل الطلاب المرتبطين بنفس المعلم
     const unsubscribe = subscribeToLeaderboard((data) => {
       setLeaders(
         data

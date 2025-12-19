@@ -261,37 +261,39 @@ export const updateUserStats = async (result: GameResult, uid: string) => {
     }
 };
 
-export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => void, teacherId?: string) => {
+export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => void, teacherId: string) => {
+  // التأكد من جلب الطلاب المرتبطين بنفس المعلم فقط
   if (!teacherId || teacherId === 'none') {
-    // إذا لم يتوفر كود المعلم، نرجع مصفوفة فارغة فوراً لضمان الخصوصية
     callback([]);
     return () => {};
   }
 
   const q = query(
-    collection(db, USERS_COLLECTION), 
-    where("teacherId", "==", teacherId), 
-    orderBy("totalCorrect", "desc")
+    collection(db, USERS_COLLECTION),
+    where("teacherId", "==", teacherId)
   );
 
-  return onSnapshot(q, (snapshot) => {
-    const leaders = snapshot.docs.map(doc => {
+  const unsubscribe = onSnapshot(q, (snapshot) => {
+    const students: LeaderboardEntry[] = [];
+    snapshot.forEach(doc => {
       const data = doc.data();
-      return { 
+      students.push({ 
         uid: doc.id, 
         displayName: data.displayName || 'لاعب',
         role: data.role || UserRole.STUDENT,
         totalCorrect: data.totalCorrect || 0,
         badgesCount: data.badgesCount || 0,
         lastActive: data.lastActive || '',
-        teacherId: data.teacherId // ضروري للفلترة البرمجية في المتصفح
-      };
+        teacherId: data.teacherId
+      });
     });
-    callback(leaders as any);
+    callback(students);
   }, (error) => {
     console.error("Leaderboard subscription error:", error);
     callback([]);
   });
+
+  return unsubscribe;
 };
 
 export const isCloudEnabledValue = () => true;
