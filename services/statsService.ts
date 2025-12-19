@@ -43,7 +43,6 @@ isSupported().then(supported => {
 const USERS_COLLECTION = 'users';
 const TEACHERS_COLLECTION = 'allowedTeachers';
 
-// الإعدادات المطلوبة للرابط كما حددتها
 const actionCodeSettings = {
   url: 'https://abeer-stzj-new.vercel.app/finish-signin',
   handleCodeInApp: true
@@ -58,13 +57,11 @@ const getLocalDateString = (date: Date = new Date()): string => {
 
 export const sendTeacherSignInLink = async (email: string) => {
   const cleanEmail = email.trim().toLowerCase();
-  
-  // التحقق من وجود المعلم مسبقاً
   const docRef = doc(db, TEACHERS_COLLECTION, cleanEmail);
   const snap = await getDoc(docRef);
 
   if (!snap.exists()) {
-    throw new Error("عذراً، هذا البريد غير مسجل كمعلم مصرح له.");
+    throw new Error("عذراً، هذا البريد غير مسجل كمعلم مصرح له في النظام.");
   }
   
   await sendSignInLinkToEmail(auth, cleanEmail, actionCodeSettings);
@@ -88,13 +85,15 @@ export const completeSignInWithLink = async (): Promise<User> => {
   window.localStorage.removeItem('emailForSignIn');
 
   if (result.user) {
-    // تحديث سجل المعلم بالـ UID وتاريخ الدخول
     const teacherDocRef = doc(db, TEACHERS_COLLECTION, cleanEmail);
-    await updateDoc(teacherDocRef, { 
-      uid: result.user.uid, 
-      lastLogin: serverTimestamp(),
-      active: true
-    });
+    const snap = await getDoc(teacherDocRef);
+    if (snap.exists()) {
+        await updateDoc(teacherDocRef, { 
+            uid: result.user.uid, 
+            lastLogin: serverTimestamp(),
+            active: true
+        });
+    }
   }
   return result.user;
 };
@@ -111,7 +110,6 @@ export const getBadgeDefinitions = (totalCorrect: number): Badge[] => [
 export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile | null> => {
   if (!uid) return null;
   
-  // البحث في الطلاب
   const studentRef = doc(db, USERS_COLLECTION, uid);
   const studentSnap = await getDoc(studentRef);
   if (studentSnap.exists()) {
@@ -119,7 +117,6 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
     return { ...data, uid: studentSnap.id, badges: getBadgeDefinitions(data.totalCorrect || 0) };
   }
   
-  // البحث في المعلمين
   const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
   const tSnap = await getDocs(q);
   if (!tSnap.empty) {

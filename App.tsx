@@ -26,13 +26,12 @@ const App: React.FC = () => {
   
   useEffect(() => {
     const handleLinkSignIn = async () => {
-        // التحقق مما إذا كان الرابط هو رابط تسجيل دخول (سواء في الرئيسية أو في finish-signin)
         if (checkIsSignInLink()) {
             try {
                 isLinkSigningIn.current = true;
                 setIsAuthChecking(true);
                 await completeSignInWithLink();
-                // بعد النجاح، التوجه للرئيسية وتنظيف الرابط
+                // تنظيف الرابط والعودة للمسار الرئيسي
                 window.history.replaceState({}, document.title, window.location.origin + '/');
             } catch (error: any) {
                 console.error("خطأ في تسجيل الدخول عبر الرابط:", error);
@@ -55,15 +54,20 @@ const App: React.FC = () => {
 
       setCurrentUser(user);
       if (user) {
+        // طباعة الـ UID المطلوبة للتأكد
+        console.log("UID:", user.uid);
+
         const existingProfile = await loadStats(user.uid);
         
         if (!existingProfile) {
-            // نتحقق من البريد أولاً لنعرف هل هو معلم أم طالب جديد
+            // التحقق من البريد الإلكتروني: هل هذا المستخدم مسجل مسبقاً كمعلم؟
             const isTeacher = await isTeacherByEmail(user.email || '');
             
             if (!isTeacher) {
-                // فقط إذا لم يكن معلماً، ننشئ له ملف طالب
+                // فقط إذا لم يكن معلماً، ننشئ له ملف طالب جديد
                 await createOrUpdatePlayerProfile(user.uid, user.email || '', user.displayName || '');
+            } else {
+                console.log("تم اكتشاف دخول معلم، بانتظار مزامنة Firestore...");
             }
         }
         
