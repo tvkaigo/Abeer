@@ -25,12 +25,17 @@ const App: React.FC = () => {
   
   useEffect(() => {
     const handleLinkSignIn = async () => {
+        // التحقق مما إذا كان المستخدم قد هبط على صفحة finish-signin أو يحمل رابط تفعيل
         if (checkIsSignInLink()) {
             try {
                 setIsAuthChecking(true);
-                await completeSignInWithLink();
+                const user = await completeSignInWithLink();
+                console.log("تم تسجيل دخول المعلم بنجاح:", user.email);
+                // إعادة توجيه المستخدم للرابط الرئيسي لتنظيف المتصفح من كود الدخول
+                window.history.replaceState({}, document.title, window.location.origin);
             } catch (error: any) {
-                alert("فشل الرابط: " + error.message);
+                console.error("خطأ في تسجيل الدخول عبر الرابط:", error);
+                alert("فشل الرابط: " + (error.message || "الرابط غير صالح"));
                 setIsAuthChecking(false);
             }
         }
@@ -45,8 +50,8 @@ const App: React.FC = () => {
       if (user) {
         // نتحقق أولاً هل هو معلم موجود؟
         const existingProfile = await loadStats(user.uid);
-        if (!existingProfile || existingProfile.role !== UserRole.TEACHER) {
-             // إذا لم يكن معلماً، نقوم بتحديث/إنشاء ملف الطالب
+        if (!existingProfile || (existingProfile.role !== UserRole.TEACHER)) {
+             // إذا لم يكن معلماً مسجلاً مسبقاً، نعتبره طالباً ونحدث/ننشئ ملفه
              await createOrUpdatePlayerProfile(user.uid, user.email || '', user.displayName || '');
         }
         

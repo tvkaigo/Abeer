@@ -43,9 +43,10 @@ isSupported().then(supported => {
 const USERS_COLLECTION = 'users';
 const TEACHERS_COLLECTION = 'Teachers';
 
+// إعدادات رابط تسجيل الدخول المحدثة حسب طلبك
 const actionCodeSettings = {
-  url: window.location.origin,
-  handleCodeInApp: true,
+  url: 'https://abeer-stzj-new.vercel.app/finish-signin',
+  handleCodeInApp: true
 };
 
 const getLocalDateString = (date: Date = new Date()): string => {
@@ -56,24 +57,22 @@ const getLocalDateString = (date: Date = new Date()): string => {
 };
 
 /**
- * إرسال رابط تسجيل الدخول للمعلم بعد التحقق من وجوده وصلاحيته
+ * إرسال رابط تسجيل الدخول للمعلم بعد التحقق من وجوده في مجموعة Teachers
  */
 export const sendTeacherSignInLink = async (email: string) => {
   const cleanEmail = email.trim().toLowerCase();
   
-  // التحقق من وجود المعلم وحالته
-  const q = query(
-    collection(db, TEACHERS_COLLECTION), 
-    where("email", "==", cleanEmail), 
-    where("active", "==", true)
-  );
-  
-  const snapshot = await getDocs(q);
-  if (snapshot.empty) {
-    throw new Error("عذراً، هذا البريد غير مسجل كمعلم نشط في النظام.");
+  // التحقق من وجود المعلم باستخدام البريد كمعرف للمستند (Document ID)
+  const docRef = doc(db, TEACHERS_COLLECTION, cleanEmail);
+  const snap = await getDoc(docRef);
+
+  if (!snap.exists()) {
+    throw new Error("عذراً، هذا البريد غير مصرح له بالدخول كمعلم.");
   }
   
+  // إرسال الرابط
   await sendSignInLinkToEmail(auth, cleanEmail, actionCodeSettings);
+  // حفظ البريد محلياً لتسهيل عملية الدخول لاحقاً
   window.localStorage.setItem('emailForSignIn', cleanEmail);
 };
 
@@ -81,23 +80,34 @@ export const sendTeacherSignInLink = async (email: string) => {
  * إكمال تسجيل الدخول عبر الرابط وربط الـ UID بالسجل
  */
 export const completeSignInWithLink = async (): Promise<User> => {
-  if (!isSignInWithEmailLink(auth, window.location.href)) throw new Error("الرابط غير صالح.");
+  if (!isSignInWithEmailLink(auth, window.location.href)) {
+    throw new Error("الرابط غير صالح أو انتهت صلاحيته.");
+  }
   
   let email = window.localStorage.getItem('emailForSignIn');
-  if (!email) email = window.prompt('يرجى إدخال بريدك الإلكتروني للتأكيد:');
-  if (!email) throw new Error("البريد الإلكتروني مطلوب.");
+  
+  // إذا فُتح الرابط في جهاز أو متصفح مختلف، نطلب الإيميل للتأكيد
+  if (!email) {
+    email = window.prompt('يرجى إدخال بريدك الإلكتروني للتأكيد:');
+  }
+  
+  if (!email) throw new Error("البريد الإلكتروني مطلوب لإكمال العملية.");
 
-  const result = await signInWithEmailLink(auth, email, window.location.href);
+  const cleanEmail = email.trim().toLowerCase();
+  const result = await signInWithEmailLink(auth, cleanEmail, window.location.href);
   window.localStorage.removeItem('emailForSignIn');
 
   if (result.user) {
-    // ربط الـ UID بسجل المعلم
-    const q = query(collection(db, TEACHERS_COLLECTION), where("email", "==", email.toLowerCase()));
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      await updateDoc(snap.docs[0].ref, { 
+    // ربط الـ UID بسجل المعلم وتحديث بيانات الدخول
+    const teacherDocRef = doc(db, TEACHERS_COLLECTION, cleanEmail);
+    const teacherSnap = await getDoc(teacherDocRef);
+    
+    if (teacherSnap.exists()) {
+      await updateDoc(teacherDocRef, { 
         uid: result.user.uid, 
-        lastLogin: serverTimestamp() 
+        linkedAt: serverTimestamp(),
+        lastLogin: serverTimestamp(),
+        active: true // التأكد من تفعيل الحساب عند الربط
       });
     }
   }
@@ -116,7 +126,6 @@ export const getBadgeDefinitions = (totalCorrect: number): Badge[] => [
 export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile | null> => {
   if (!uid) return null;
   
-  // البحث في الطلاب أولاً
   const studentRef = doc(db, USERS_COLLECTION, uid);
   const studentSnap = await getDoc(studentRef);
   if (studentSnap.exists()) {
@@ -124,7 +133,6 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
     return { ...data, uid: studentSnap.id, badges: getBadgeDefinitions(data.totalCorrect || 0) };
   }
   
-  // البحث في المعلمين بواسطة UID
   const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
   const tSnap = await getDocs(q);
   if (!tSnap.empty) {
