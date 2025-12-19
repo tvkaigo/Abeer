@@ -37,8 +37,10 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                         if (tData) setTeacherName(tData.displayName);
                     }
                 } else if (data.role === UserRole.TEACHER) {
-                    setTeacherId(currentUser);
-                    setTeacherName(data.displayName);
+                    // هام: يجب استخدام المعرف الوثائقي (الإيميل) كـ teacherId لأنه هو المفتاح المستخدم في سجلات الطلاب
+                    const teacher = data as TeacherProfile;
+                    setTeacherId(teacher.teacherId);
+                    setTeacherName(teacher.displayName);
                 }
             }
         } catch (err) {
