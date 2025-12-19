@@ -1,8 +1,8 @@
 
-import React, { useEffect, useState } from 'react';
-import { Home, Trophy, Medal, Crown, Sparkles, Loader2, Globe2, TrendingUp, CloudOff, Award, UserCheck, Users, AlertCircle } from 'lucide-react';
-import { subscribeToLeaderboard, getBadgeDefinitions, isCloudEnabledValue, loadStats } from '../services/statsService';
-import { LeaderboardEntry, UserRole, UserStats, TeacherProfile } from '../types';
+import { useEffect, useState } from 'react';
+import { Home, Trophy, Medal, Crown, Sparkles, Loader2, Globe2, CloudOff, UserCheck, Users, AlertCircle, Award } from 'lucide-react';
+import { subscribeToLeaderboard, getBadgeDefinitions, isCloudEnabledValue, loadStats, fetchTeacherInfo } from '../services/statsService';
+import { LeaderboardEntry, UserRole, UserStats } from '../types';
 
 interface LeaderboardScreenProps {
   onBack: () => void;
@@ -26,6 +26,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
         }
 
         try {
+            // جلب بيانات المستخدم الحالي لتحديد "فصله"
             const data = await loadStats(currentUser);
             if (data) {
                 if (data.role === UserRole.STUDENT) {
@@ -33,11 +34,13 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                     const tid = student.teacherId || 'none';
                     setTeacherId(tid);
                     if (tid !== 'none') {
-                        const tData = await loadStats(tid);
+                        // استخدام fetchTeacherInfo لأننا نبحث بمعرف المستند (الإيميل)
+                        const tData = await fetchTeacherInfo(tid);
                         if (tData) setTeacherName(tData.displayName);
                     }
                 } else if (data.role === UserRole.TEACHER) {
-                    setTeacherId(currentUser);
+                    // إذا كان المستخدم معلماً، يعرض طلابه هو
+                    setTeacherId(data.teacherId);
                     setTeacherName(data.displayName);
                 }
             }
@@ -60,6 +63,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
         return;
     }
 
+    // الاشتراك في التحديثات الحية لبيانات الطلاب المرتبطين بنفس المعلم
     const unsubscribe = subscribeToLeaderboard((data) => {
       setLeaders(data);
       setIsLoading(false);
@@ -239,11 +243,6 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                           <h3 className={`font-black text-lg truncate ${isCurrentUser ? 'text-white' : 'text-slate-800'}`}>
                             {player.displayName}
                           </h3>
-                          {player.role === UserRole.TEACHER && (
-                            <span className="bg-purple-500 text-white text-[9px] px-2 py-0.5 rounded-full font-bold border border-purple-400 uppercase flex items-center gap-1">
-                                <UserCheck size={10} /> معلم
-                            </span>
-                          )}
                         </div>
                       </div>
                       <div className="hidden md:flex gap-1.5 px-6 border-x border-slate-100/10">
