@@ -63,8 +63,9 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
       return;
     }
 
-    // ⚠️ استخدم teacherId كما هو (UID)
+    // يتم الآن الفلترة والاشتراك باستخدام المعرف النصي الذي سيحول لمرجع داخلياً
     const unsubscribe = subscribeToLeaderboard((data) => {
+      // الفلترة الإضافية في الواجهة لضمان الدقة
       const filtered = data.filter(
         student => student.teacherId === teacherId
       );
