@@ -1,12 +1,14 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, Mail, Lock, LogIn, UserPlus, Loader2, AlertCircle, UserCheck, ChevronDown, GraduationCap, CheckCircle2, Info, Timer } from 'lucide-react';
-import { auth, createOrUpdatePlayerProfile, fetchAllTeachers, sendTeacherSignInLink } from '../services/statsService';
+import { User, Mail, Lock, LogIn, UserPlus, Loader2, AlertCircle, UserCheck, ChevronDown, GraduationCap, Info } from 'lucide-react';
+import { auth, createOrUpdatePlayerProfile, fetchAllTeachers, isTeacherByEmail, db } from '../services/statsService';
 import { 
     signInWithEmailAndPassword, 
     createUserWithEmailAndPassword, 
-    updateProfile 
+    updateProfile,
+    signOut
 } from 'firebase/auth';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { TeacherProfile } from '../types';
 
 interface UserEntryModalProps {
@@ -23,27 +25,6 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isFetchingTeachers, setIsFetchingTeachers] = useState(false);
-  const [linkSent, setLinkSent] = useState(false);
-  const [cooldown, setCooldown] = useState(0);
-
-  // التحقق من وجود مهلة سابقة عند تحميل المكون
-  useEffect(() => {
-    const lastSend = localStorage.getItem('lastTeacherLinkSend');
-    if (lastSend) {
-      const diff = Math.floor((Date.now() - parseInt(lastSend)) / 1000);
-      if (diff < 60) {
-        setCooldown(60 - diff);
-      }
-    }
-  }, []);
-
-  // إدارة الموقت التنازلي
-  useEffect(() => {
-    if (cooldown > 0) {
-      const timer = setTimeout(() => setCooldown(prev => prev - 1), 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [cooldown]);
 
   useEffect(() => {
     if (mode === 'signup') {
@@ -65,32 +46,38 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
         });
     } else {
         setError('');
-        setLinkSent(false);
     }
   }, [mode]);
 
-  const isValidEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim());
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isLoading) return; // منع الإرسال المتكرر أثناء التحميل
+    if (isLoading) return;
 
     setError('');
     setIsLoading(true);
 
     try {
       if (mode === 'teacher') {
-        if (cooldown > 0) {
-          throw new Error(`يرجى الانتظار ${cooldown} ثانية قبل محاولة الإرسال مرة أخرى.`);
+        // التحقق أولاً من أن البريد مدرج في قائمة المعلمين المسموح لهم
+        const cleanEmail = email.trim().toLowerCase();
+        const exists = await isTeacherByEmail(cleanEmail);
+        
+        if (!exists) {
+            throw new Error("هذا البريد الإلكتروني غير مسجل في قائمة المعلمين المعتمدين لدى المالك.");
         }
-        if (!isValidEmail(email)) throw new Error("يرجى إدخال بريد إلكتروني صحيح");
+
+        // محاولة تسجيل الدخول بكلمة المرور الممنوحة
+        const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, password);
         
-        await sendTeacherSignInLink(email.trim());
-        
-        // تسجيل وقت الإرسال وبدء المهلة
-        localStorage.setItem('lastTeacherLinkSend', Date.now().toString());
-        setCooldown(60);
-        setLinkSent(true);
+        // تحديث بيانات المعلم في Firestore
+        const teacherDocRef = doc(db, 'Teachers', cleanEmail);
+        await setDoc(teacherDocRef, { 
+            uid: userCredential.user.uid, 
+            lastActive: new Date().toISOString(),
+            active: true
+        }, { merge: true });
+
+        onSuccess();
       } else if (mode === 'signup') {
         const nameToSave = displayName.trim();
         if (!nameToSave) throw new Error("يرجى إدخال اسمك بالعربية");
@@ -108,7 +95,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
       console.error(err);
       let msg = "حدث خطأ ما، يرجى المحاولة مرة أخرى";
       if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        msg = "بيانات الدخول غير صحيحة. تأكد من البريد وكلمة المرور.";
+        msg = "بيانات الدخول غير صحيحة. تأكد من البريد وكلمة المرور الممنوحة لك.";
       } else if (err.code === 'auth/email-already-in-use') {
         msg = "هذا البريد الإلكتروني مستخدم بالفعل، جرب تسجيل الدخول.";
       } else if (err.code === 'auth/weak-password') {
@@ -121,29 +108,6 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
       setIsLoading(false);
     }
   };
-
-  if (linkSent) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-pop-in">
-        <div className="bg-white rounded-[2.5rem] shadow-2xl p-8 max-w-md w-full border-4 border-indigo-50 text-center">
-            <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6">
-                <CheckCircle2 size={48} />
-            </div>
-            <h2 className="text-2xl font-black text-slate-800 mb-4">تم إرسال الرابط بنجاح!</h2>
-            <p className="text-slate-600 leading-relaxed mb-8">
-                لقد أرسلنا رابط تسجيل دخول آمن إلى <strong>{email}</strong>.<br/><br/>
-                يرجى فتح بريدك الإلكتروني والضغط على الرابط. إذا لم تجده، <strong>تأكد من فحص مجلد الرسائل غير المرغوب فيها (Spam/Junk)</strong>.
-            </p>
-            <button 
-                onClick={() => setLinkSent(false)}
-                className="text-indigo-600 font-bold hover:underline"
-            >
-                العودة للخلف
-            </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-pop-in">
@@ -158,7 +122,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
              {mode === 'teacher' ? 'بوابة المعلم' : 'العبقري الصغير'}
           </h2>
           <p className="text-slate-500 mt-2 font-medium">
-            {mode === 'login' ? 'سجل دخولك لمتابعة تقدمك' : mode === 'signup' ? 'أنشئ حساباً جديداً لتبدأ رحلتك' : 'سجل دخولك كمعلم عبر البريد'}
+            {mode === 'login' ? 'سجل دخولك لمتابعة تقدمك' : mode === 'signup' ? 'أنشئ حساباً جديداً لتبدأ رحلتك' : 'سجل دخولك كمعلم باستخدام بياناتك الممنوحة'}
           </p>
         </div>
 
@@ -196,7 +160,6 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
                       onChange={(e) => setDisplayName(e.target.value)}
                       placeholder="مثال: سارة محمد"
                       className="w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 focus:bg-white outline-none transition-all pr-12 bg-slate-50 font-bold"
-                      disabled={isFetchingTeachers || (mode === 'signup' && teachers.length === 0)}
                     />
                     <User className="absolute right-4 top-4 text-slate-400" size={20} />
                   </div>
@@ -209,8 +172,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
                       required
                       value={teacherId}
                       onChange={(e) => setTeacherId(e.target.value)}
-                      className="w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 focus:bg-white outline-none transition-all pr-12 bg-slate-50 font-bold appearance-none cursor-pointer disabled:bg-slate-200"
-                      disabled={isFetchingTeachers || teachers.length === 0}
+                      className="w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 focus:bg-white outline-none transition-all pr-12 bg-slate-50 font-bold appearance-none cursor-pointer"
                     >
                       <option value="">{isFetchingTeachers ? 'جاري التحميل...' : (teachers.length === 0 ? '-- لا يوجد معلمين --' : '-- اضغط لاختيار المعلم --')}</option>
                       {teachers.map(t => (
@@ -240,30 +202,28 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
             </div>
           </div>
 
+          <div>
+            <label className="block text-slate-700 font-bold mb-2 pr-1 text-sm">كلمة المرور</label>
+            <div className="relative">
+              <input 
+                type="password"
+                required
+                dir="ltr"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className={`w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 outline-none transition-all pr-12 bg-slate-50 text-right ${mode === 'teacher' ? 'focus:border-purple-500 focus:ring-purple-50' : 'focus:border-indigo-500 focus:ring-indigo-50'}`}
+              />
+              <Lock className="absolute right-4 top-4 text-slate-400" size={20} />
+            </div>
+          </div>
+
           {mode === 'teacher' && (
-            <div className="bg-indigo-50 text-indigo-700 p-4 rounded-2xl text-xs font-bold flex items-start gap-3 border border-indigo-100 animate-fade-in">
+            <div className="bg-purple-50 text-purple-700 p-4 rounded-2xl text-xs font-bold flex items-start gap-3 border border-purple-100 animate-fade-in">
               <Info className="shrink-0 mt-0.5" size={16} />
               <p className="leading-relaxed">
-                سيتم إرسال رابط تسجيل دخول آمن إلى بريدك الإلكتروني. لا حاجة لكلمة مرور، اضغط على الرابط في رسالتك للدخول مباشرة.
+                يرجى إدخال البريد الإلكتروني وكلمة المرور التي تم تزويدك بها من قبل مالك المنصة. لا يمكنك إنشاء حساب معلم بنفسك.
               </p>
-            </div>
-          )}
-
-          {mode !== 'teacher' && (
-            <div>
-              <label className="block text-slate-700 font-bold mb-2 pr-1 text-sm">كلمة المرور</label>
-              <div className="relative">
-                <input 
-                  type="password"
-                  required
-                  dir="ltr"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 focus:bg-white outline-none transition-all pr-12 bg-slate-50 text-right"
-                />
-                <Lock className="absolute right-4 top-4 text-slate-400" size={20} />
-              </div>
             </div>
           )}
 
@@ -276,17 +236,13 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
 
           <button 
             type="submit"
-            disabled={isLoading || cooldown > 0 || (mode === 'signup' && (isFetchingTeachers || teachers.length === 0)) || (mode === 'teacher' && !isValidEmail(email))}
+            disabled={isLoading || (mode === 'signup' && (isFetchingTeachers || teachers.length === 0))}
             className={`w-full text-white font-black py-4 rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2 mt-4 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed ${mode === 'teacher' ? 'bg-purple-600 hover:bg-purple-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
           >
             {isLoading ? (
               <Loader2 className="animate-spin" size={24} />
             ) : mode === 'teacher' ? (
-              cooldown > 0 ? (
-                <><Timer size={20} /> إعادة الإرسال ({cooldown})</>
-              ) : (
-                <>إرسال رابط الدخول <Mail size={20} /></>
-              )
+              <>دخول المعلم <LogIn size={20} className="rotate-180" /></>
             ) : mode === 'login' ? (
               <>دخول الطالب <LogIn size={20} className="rotate-180" /></>
             ) : (

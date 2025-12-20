@@ -9,7 +9,7 @@ import ProfileScreen from './components/ProfileScreen';
 import UserEntryModal from './components/UserEntryModal';
 import { AppState, GameConfig, GameResult, Question, Difficulty, Operation, UserStats, UserRole, TeacherProfile } from './types';
 import { generateQuestions } from './services/mathService';
-import { updateUserStats, auth, createOrUpdatePlayerProfile, subscribeToUserStats, checkIsSignInLink, completeSignInWithLink, loadStats, isTeacherByEmail } from './services/statsService';
+import { updateUserStats, auth, createOrUpdatePlayerProfile, subscribeToUserStats, loadStats, isTeacherByEmail } from './services/statsService';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 
 const App: React.FC = () => {
@@ -23,47 +23,20 @@ const App: React.FC = () => {
   const [currentUserData, setCurrentUserData] = useState<UserStats | TeacherProfile | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
-  const isLinkSigningIn = useRef(false);
   
-  useEffect(() => {
-    const handleLinkSignIn = async () => {
-        if (checkIsSignInLink()) {
-            try {
-                isLinkSigningIn.current = true;
-                setIsAuthChecking(true);
-                await completeSignInWithLink();
-                window.history.replaceState({}, document.title, window.location.origin + '/');
-            } catch (error: any) {
-                console.error("Link sign in error:", error);
-                alert(error.message || "الرابط غير صالح.");
-                setIsAuthChecking(false);
-            } finally {
-                isLinkSigningIn.current = false;
-            }
-        } else {
-          // حالة الدخول العادي أو الجلسة المحفوظة يتم التعامل معها في onAuthStateChanged
-        }
-    };
-    handleLinkSignIn();
-  }, []);
-
   useEffect(() => {
     let userSubUnsubscribe: () => void = () => {};
     
     const authUnsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (isLinkSigningIn.current) return;
-
       setCurrentUser(user);
       if (user) {
         setIsAuthChecking(true);
         
-        // محاولة جلب البيانات مباشرة للتأكد من وجود الملف الشخصي في 'Users'
         const profile = await loadStats(user.uid);
         
         if (!profile) {
             const isTeacher = await isTeacherByEmail(user.email || '');
             if (!isTeacher) {
-                // إذا لم يوجد، نقوم بإنشائه لضمان عمل المزامنة لاحقاً
                 await createOrUpdatePlayerProfile(user.uid, user.email || '', user.displayName || '');
                 const newProfile = await loadStats(user.uid);
                 setCurrentUserData(newProfile);
@@ -72,7 +45,6 @@ const App: React.FC = () => {
             setCurrentUserData(profile);
         }
         
-        // بدء الاشتراك للتحديثات الحية لضمان بقاء البيانات محدثة
         userSubUnsubscribe = subscribeToUserStats(user.uid, (data) => {
           if (data) {
             setCurrentUserData(data);
@@ -80,7 +52,6 @@ const App: React.FC = () => {
           }
         });
 
-        // مهلة أمان لإنهاء شاشة التحميل في حال وجود تأخر من Firestore
         const timer = setTimeout(() => {
             setIsAuthChecking(false);
         }, 4000);

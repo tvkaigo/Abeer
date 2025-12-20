@@ -18,9 +18,7 @@ import {
 } from 'firebase/firestore';
 import { 
   getAuth, 
-  sendSignInLinkToEmail, 
-  isSignInWithEmailLink, 
-  signInWithEmailLink, 
+  signInWithEmailAndPassword,
   signOut, 
   User,
   setPersistence,
@@ -55,59 +53,12 @@ isSupported().then(supported => {
 const USERS_COLLECTION = 'Users'; 
 const TEACHERS_COLLECTION = 'Teachers'; 
 
-const actionCodeSettings = {
-  url: window.location.origin + '/',
-  handleCodeInApp: true
-};
-
 const getLocalDateString = (date: Date = new Date()): string => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
-
-export const sendTeacherSignInLink = async (email: string) => {
-  const cleanEmail = email.trim().toLowerCase();
-  await sendSignInLinkToEmail(auth, cleanEmail, actionCodeSettings);
-  window.localStorage.setItem('emailForSignIn', cleanEmail);
-};
-
-export const completeSignInWithLink = async (): Promise<User> => {
-  if (!isSignInWithEmailLink(auth, window.location.href)) {
-    throw new Error("الرابط غير صالح أو انتهت صلاحيته.");
-  }
-  
-  let email = window.localStorage.getItem('emailForSignIn');
-  if (!email) {
-    email = window.prompt('يرجى إدخل بريدك الإلكتروني للتأكيد:');
-  }
-  
-  if (!email) throw new Error("البريد الإلكتروني مطلوب لإكمال العملية.");
-
-  const cleanEmail = email.trim().toLowerCase();
-  const result = await signInWithEmailLink(auth, cleanEmail, window.location.href);
-  window.localStorage.removeItem('emailForSignIn');
-
-  if (result.user) {
-    const teacherDocRef = doc(db, TEACHERS_COLLECTION, cleanEmail);
-    const snap = await getDoc(teacherDocRef);
-
-    if (!snap.exists()) {
-        await signOut(auth);
-        throw new Error("عذراً، هذا البريد غير مسجل كمعلم مصرح له في النظام.");
-    }
-
-    await setDoc(teacherDocRef, { 
-        uid: result.user.uid, 
-        lastLogin: serverTimestamp(),
-        active: true
-    }, { merge: true });
-  }
-  return result.user;
-};
-
-export const checkIsSignInLink = () => isSignInWithEmailLink(auth, window.location.href);
 
 export const getBadgeDefinitions = (totalCorrect: number): Badge[] => [
   { id: 1, name: 'مبتدئ', required: 50, icon: '🌱', unlocked: totalCorrect >= 50, color: 'text-green-600 bg-green-100 border-green-200' },
@@ -195,7 +146,7 @@ export const createOrUpdatePlayerProfile = async (uid: string, email: string, di
     const studentRef = doc(db, USERS_COLLECTION, uid);
     try {
       const snap = await getDoc(studentRef);
-      const cleanTeacherId = teacherId?.trim() || ''; // Use as is (UID)
+      const cleanTeacherId = teacherId?.trim() || ''; 
       
       if (!snap.exists()) {
           await setDoc(studentRef, {
@@ -270,9 +221,8 @@ export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => v
     return () => {};
   }
 
-  const cleanTeacherId = teacherId.trim(); // Use as is (UID)
+  const cleanTeacherId = teacherId.trim();
 
-  // جلب كافة طلاب الفصل بدون حد أقصى (Limit) لضمان ظهور الجميع
   const q = query(
     collection(db, USERS_COLLECTION),
     where("teacherId", "==", cleanTeacherId)
@@ -289,7 +239,7 @@ export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => v
         totalCorrect: data.totalCorrect || 0,
         badgesCount: data.badgesCount || 0,
         lastActive: data.lastActive || '',
-        teacherId: data.teacherId // ضروري للفلترة في الواجهة
+        teacherId: data.teacherId 
       });
     });
     callback(students);
@@ -305,10 +255,8 @@ export const updateUserProfileName = async (uid: string, newName: string, role: 
     const user = auth.currentUser;
     if (!user) throw new Error("يجب تسجيل الدخول أولاً");
 
-    // 1. تحديث الاسم في Firebase Auth
     await updateProfile(user, { displayName: newName });
 
-    // 2. تحديث الاسم في Firestore
     if (role === UserRole.STUDENT) {
         const studentRef = doc(db, USERS_COLLECTION, uid);
         await updateDoc(studentRef, { displayName: newName });
