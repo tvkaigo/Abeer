@@ -67,22 +67,36 @@ export const getBadgeDefinitions = (totalCorrect: number): Badge[] => [
   { id: 4, name: 'الأسطورة', required: 300, icon: '🏆', unlocked: totalCorrect >= 300, color: 'text-yellow-600 bg-yellow-100 border-yellow-200' },
 ];
 
+/**
+ * جلب بيانات المستخدم (طالب أو معلم) بناءً على الـ UID الخاص بـ Firebase Auth
+ */
 export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile | null> => {
   if (!uid) return null;
   
   try {
+    // 1. البحث في مجموعة الطلاب أولاً
     const studentRef = doc(db, USERS_COLLECTION, uid);
     const studentSnap = await getDoc(studentRef);
     if (studentSnap.exists()) {
       const data = studentSnap.data() as UserStats;
-      return { ...data, uid: studentSnap.id, badges: getBadgeDefinitions(data.totalCorrect || 0) };
+      return { 
+        ...data, 
+        uid: studentSnap.id, 
+        badges: getBadgeDefinitions(data.totalCorrect || 0) 
+      };
     }
     
+    // 2. البحث في مجموعة المعلمين (باستخدام حقل uid المخزن داخل الوثيقة)
     const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
     const tSnap = await getDocs(q);
     if (!tSnap.empty) {
-      const docData = tSnap.docs[0].data();
-      return { ...docData, teacherId: tSnap.docs[0].id, role: UserRole.TEACHER } as TeacherProfile;
+      const docSnap = tSnap.docs[0];
+      const docData = docSnap.data();
+      return { 
+        ...docData, 
+        teacherId: docSnap.id, // معرف الوثيقة (الذي غالباً ما يكون البريد الإلكتروني)
+        role: UserRole.TEACHER 
+      } as TeacherProfile;
     }
   } catch (error) {
     console.error("Error loading stats:", error);
@@ -90,12 +104,15 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
   return null;
 };
 
+/**
+ * التحقق من وجود المعلم في قاعدة البيانات باستخدام بريده الإلكتروني
+ */
 export const isTeacherByEmail = async (email: string): Promise<boolean> => {
     if (!email) return false;
     try {
       const docRef = doc(db, TEACHERS_COLLECTION, email.trim().toLowerCase());
       const snap = await getDoc(docRef);
-      return snap.exists();
+      return snap.exists() && snap.data()?.active !== false;
     } catch {
       return false;
     }
@@ -106,7 +123,10 @@ export const fetchTeacherInfo = async (teacherId: string): Promise<TeacherProfil
   try {
     const docRef = doc(db, TEACHERS_COLLECTION, teacherId.trim());
     const docSnap = await getDoc(docRef);
-    if (docSnap.exists()) return { ...docSnap.data(), teacherId: docSnap.id, role: UserRole.TEACHER } as TeacherProfile;
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      return { ...data, teacherId: docSnap.id, role: UserRole.TEACHER } as TeacherProfile;
+    }
   } catch (error) {
     console.error("Error fetching teacher info:", error);
   }
@@ -117,7 +137,10 @@ export const fetchAllTeachers = async (): Promise<TeacherProfile[]> => {
   try {
     const q = query(collection(db, TEACHERS_COLLECTION), where("active", "==", true));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ ...doc.data(), teacherId: doc.id })) as any;
+    return snapshot.docs.map(doc => ({ 
+      ...doc.data(), 
+      teacherId: doc.id 
+    })) as any;
   } catch (error) {
     console.error("Error fetching teachers:", error);
     return [];
@@ -125,21 +148,25 @@ export const fetchAllTeachers = async (): Promise<TeacherProfile[]> => {
 };
 
 export const subscribeToUserStats = (uid: string, callback: (stats: any) => void) => {
-  return onSnapshot(doc(db, USERS_COLLECTION, uid), async (docSnap) => {
+  // الاشتراك في تغييرات الطالب
+  const studentSub = onSnapshot(doc(db, USERS_COLLECTION, uid), async (docSnap) => {
     if (docSnap.exists()) {
       const data = docSnap.data();
       callback({ ...data, uid: docSnap.id, badges: getBadgeDefinitions(data.totalCorrect || 0) });
     } else {
+        // إذا لم يكن طالباً، قد يكون معلماً. نقوم بعمل استعلام لمرة واحدة أو اشتراك للمعلم
         const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
         const tSnap = await getDocs(q);
         if (!tSnap.empty) {
-          const data = tSnap.docs[0].data();
-          callback({ ...data, teacherId: tSnap.docs[0].id, role: UserRole.TEACHER });
+          const docData = tSnap.docs[0].data();
+          callback({ ...docData, teacherId: tSnap.docs[0].id, role: UserRole.TEACHER });
         }
     }
   }, (error) => {
     console.error("Subscription error:", error);
   });
+  
+  return studentSub;
 };
 
 export const createOrUpdatePlayerProfile = async (uid: string, email: string, displayName: string, teacherId?: string) => {

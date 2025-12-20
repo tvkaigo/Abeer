@@ -8,7 +8,7 @@ import {
     updateProfile,
     signOut
 } from 'firebase/auth';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc } from 'firebase/firestore';
 import { TeacherProfile } from '../types';
 
 interface UserEntryModalProps {
@@ -40,7 +40,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
             }
             setIsFetchingTeachers(false);
         }).catch((err) => {
-            setError("عذراً، فشل جلب قائمة المعلمين من النظام. يرجى التحقق من اتصالك بالإنترنت.");
+            setError("عذراً، فشل جلب قائمة المعلمين من النظام.");
             setIsFetchingTeachers(false);
             setTeachers([]);
         });
@@ -57,19 +57,19 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
     setIsLoading(true);
 
     try {
+      const cleanEmail = email.trim().toLowerCase();
+      
       if (mode === 'teacher') {
-        // التحقق أولاً من أن البريد مدرج في قائمة المعلمين المسموح لهم
-        const cleanEmail = email.trim().toLowerCase();
+        // 1. التحقق من وجود المعلم في قاعدة البيانات أولاً كإجراء أمني وتأكيدي
         const exists = await isTeacherByEmail(cleanEmail);
-        
         if (!exists) {
-            throw new Error("هذا البريد الإلكتروني غير مسجل في قائمة المعلمين المعتمدين لدى المالك.");
+            throw new Error("عذراً، هذا البريد الإلكتروني غير مسجل كمعلم معتمد في النظام.");
         }
 
-        // محاولة تسجيل الدخول بكلمة المرور الممنوحة
+        // 2. محاولة تسجيل الدخول
         const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, password);
         
-        // تحديث بيانات المعلم في Firestore
+        // 3. تحديث الـ UID في وثيقة المعلم لربط الـ Auth بـ Firestore إذا لم يكن مربوطاً
         const teacherDocRef = doc(db, 'Teachers', cleanEmail);
         await setDoc(teacherDocRef, { 
             uid: userCredential.user.uid, 
@@ -88,22 +88,29 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
         await updateProfile(userCredential.user, { displayName: nameToSave });
         onSuccess();
       } else {
+        // تسجيل دخول الطالب التقليدي
         await signInWithEmailAndPassword(auth, email, password);
         onSuccess();
       }
     } catch (err: any) {
-      console.error(err);
+      console.error("Login Error:", err);
       let msg = "حدث خطأ ما، يرجى المحاولة مرة أخرى";
+      
       if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        msg = "بيانات الدخول غير صحيحة. تأكد من البريد وكلمة المرور الممنوحة لك.";
+        msg = "بيانات الدخول غير صحيحة. يرجى التأكد من البريد وكلمة المرور الممنوحة لك.";
       } else if (err.code === 'auth/email-already-in-use') {
         msg = "هذا البريد الإلكتروني مستخدم بالفعل، جرب تسجيل الدخول.";
       } else if (err.code === 'auth/weak-password') {
-        msg = "كلمة المرور يجب أن تكون 6 أحرف على الأقل للأمان.";
+        msg = "كلمة المرور ضعيفة جداً.";
       } else if (err.message) {
         msg = err.message;
       }
+      
       setError(msg);
+      // إذا فشل المعلم في التحقق بعد نجاح الـ Auth (نادر) نقوم بتسجيل خروجه
+      if (mode === 'teacher' && auth.currentUser) {
+          await signOut(auth);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -122,7 +129,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
              {mode === 'teacher' ? 'بوابة المعلم' : 'العبقري الصغير'}
           </h2>
           <p className="text-slate-500 mt-2 font-medium">
-            {mode === 'login' ? 'سجل دخولك لمتابعة تقدمك' : mode === 'signup' ? 'أنشئ حساباً جديداً لتبدأ رحلتك' : 'سجل دخولك كمعلم باستخدام بياناتك الممنوحة'}
+            {mode === 'login' ? 'سجل دخولك لمتابعة تقدمك' : mode === 'signup' ? 'أنشئ حساباً جديداً لتبدأ رحلتك' : 'ادخل باستخدام بيانات المعلم الممنوحة لك'}
           </p>
         </div>
 
@@ -221,16 +228,16 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
           {mode === 'teacher' && (
             <div className="bg-purple-50 text-purple-700 p-4 rounded-2xl text-xs font-bold flex items-start gap-3 border border-purple-100 animate-fade-in">
               <Info className="shrink-0 mt-0.5" size={16} />
-              <p className="leading-relaxed">
-                يرجى إدخال البريد الإلكتروني وكلمة المرور التي تم تزويدك بها من قبل مالك المنصة. لا يمكنك إنشاء حساب معلم بنفسك.
+              <p className="leading-relaxed text-right">
+                تسجيل دخول المعلم متاح فقط باستخدام البريد الإلكتروني وكلمة المرور الممنوحة من قبل إدارة المنصة.
               </p>
             </div>
           )}
 
           {error && (
-            <div className="bg-red-50 text-red-600 p-4 rounded-2xl text-sm font-black flex items-start gap-2 border border-red-100 shadow-sm">
+            <div className="bg-red-50 text-red-600 p-4 rounded-2xl text-sm font-black flex items-start gap-2 border border-red-100 shadow-sm animate-shake">
               <AlertCircle size={20} className="shrink-0" />
-              <span className="leading-relaxed">{error}</span>
+              <span className="leading-relaxed text-right">{error}</span>
             </div>
           )}
 
