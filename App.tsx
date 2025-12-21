@@ -9,7 +9,7 @@ import ProfileScreen from './components/ProfileScreen';
 import UserEntryModal from './components/UserEntryModal';
 import { AppState, GameConfig, GameResult, Question, Difficulty, Operation, UserStats, UserRole, TeacherProfile } from './types';
 import { generateQuestions } from './services/mathService';
-import { updateUserStats, auth, createOrUpdatePlayerProfile, subscribeToUserStats, loadStats } from './services/statsService';
+import { updateUserStats, auth, subscribeToUserStats } from './services/statsService';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 
 const App: React.FC = () => {
@@ -35,7 +35,6 @@ const App: React.FC = () => {
         userSubRef.current = null;
       }
 
-      // لا نقوم بمزامنة الإحصائيات للمستخدم المجهول (ضيف)
       if (user && !user.isAnonymous) {
         setIsAuthChecking(true);
         try {
@@ -78,9 +77,10 @@ const App: React.FC = () => {
   const handleEndGame = async (result: GameResult) => {
     setIsSaving(true);
     setGameResult(result);
-    if (currentUser && !currentUser.isAnonymous && currentUserData?.role === UserRole.STUDENT) {
+    // السماح للمعلم والطالب بحفظ النتائج
+    if (currentUser && !currentUser.isAnonymous && currentUserData) {
         try {
-            await updateUserStats(result, currentUser.uid);
+            await updateUserStats(result, currentUser.uid, currentUserData.role);
         } catch (e) {
             console.error("Failed to save stats:", e);
         }
@@ -101,7 +101,6 @@ const App: React.FC = () => {
     </div>
   );
 
-  // يعرض مودال الدخول إذا لم يكن هناك مستخدم، أو إذا كان المستخدم الحالي "ضيفاً مجهولاً"
   const isRealUser = currentUser && !currentUser.isAnonymous;
 
   return (
@@ -118,7 +117,7 @@ const App: React.FC = () => {
                     onShowProfile={() => setAppState(AppState.PROFILE)}
                     highScore={highScore}
                     userName={currentUserData?.displayName || currentUser.displayName || ''}
-                    currentTotalScore={currentUserData?.role === UserRole.STUDENT ? (currentUserData as UserStats).totalCorrect : 0}
+                    currentTotalScore={currentUserData?.totalCorrect || 0}
                     role={currentUserData?.role}
                     teacherId={currentUserData?.role === UserRole.STUDENT ? (currentUserData as UserStats).teacherId : (currentUserData?.role === UserRole.TEACHER ? (currentUserData as TeacherProfile).teacherId : undefined)}
                 />
@@ -134,7 +133,7 @@ const App: React.FC = () => {
                     onRestart={handleRestart} 
                     isNewHighScore={isNewHighScore}
                     userName={currentUserData?.displayName || ''}
-                    totalCumulativeScore={currentUserData?.role === UserRole.STUDENT ? (currentUserData as UserStats).totalCorrect : 0}
+                    totalCumulativeScore={currentUserData?.totalCorrect || 0}
                 />
             )}
         </>

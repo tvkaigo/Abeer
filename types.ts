@@ -80,6 +80,7 @@ export interface UserStats {
 }
 
 export interface TeacherProfile {
+  uid?: string; // UID الخاص بـ Firebase Auth للربط
   teacherId: string; // Document ID
   email: string;
   displayName: string;

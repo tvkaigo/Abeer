@@ -79,13 +79,13 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
         const teacherProfile = await isTeacherByEmail(cleanEmail);
         
         if (teacherProfile) {
-            // تفعيل الحساب تلقائياً عند أول دخول كما هو مطلوب
-            if (!teacherProfile.active) {
+            // التحقق مما إذا كان الحساب غير مفعل أو غير مرتبط بـ UID بعد
+            if (!teacherProfile.active || !teacherProfile.uid) {
                 await activateTeacherAccount(teacherProfile.teacherId, user.uid);
-                setSuccess("أهلاً بك يا معلمنا! تم تفعيل حسابك لأول مرة بنجاح.");
+                setSuccess("أهلاً بك يا معلمنا! تم ربط وتفعيل حسابك بنجاح.");
                 setTimeout(() => onSuccess(), 1500);
             } else {
-                // الحساب مفعل مسبقاً، مجرد دخول عادي
+                // الحساب مفعل ومرتبط مسبقاً، مجرد دخول عادي
                 onSuccess();
             }
         } else {

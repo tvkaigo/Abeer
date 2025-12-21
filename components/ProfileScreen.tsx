@@ -59,7 +59,11 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, playerData, userI
     }
   };
 
-  if (!playerData) return null;
+  if (!playerData) return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+          <Loader2 size={48} className="text-indigo-600 animate-spin" />
+      </div>
+  );
 
   const isTeacher = playerData.role === UserRole.TEACHER;
   const initials = (displayName || playerData.displayName).substring(0, 1).toUpperCase();
@@ -152,7 +156,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, playerData, userI
                     </div>
                 </div>
 
-                {/* Teacher Info (For Students) */}
+                {/* Teacher Info (For Students Only) */}
                 {!isTeacher && (
                     <div className="space-y-2 animate-fade-in">
                         <label className="text-xs font-bold text-slate-400 mr-2 uppercase tracking-widest flex items-center gap-2">
@@ -186,25 +190,6 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, playerData, userI
                     <div className="text-[9px] font-bold text-slate-400 uppercase">يوم</div>
                 </div>
             </div>
-
-            {/* Badges Preview */}
-            {unlockedBadges.length > 0 && (
-                <div className="mt-6 pt-6 border-t border-slate-100">
-                    <h3 className="text-xs font-bold text-slate-400 uppercase mb-4 tracking-widest flex items-center gap-2">
-                        <Award size={14} /> إنجازاتك الأخيرة
-                    </h3>
-                    <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
-                        {unlockedBadges.slice(0, 3).map(b => (
-                            <div key={b.id} className="flex flex-col items-center gap-2 min-w-[70px]">
-                                <div className="text-4xl hover:scale-110 transition-transform cursor-default">
-                                    {b.icon}
-                                </div>
-                                <span className="text-[10px] font-bold text-slate-600 text-center leading-tight">{b.name}</span>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            )}
 
             {/* Status Messages */}
             <div className="mt-4">
