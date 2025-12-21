@@ -24,48 +24,62 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   
+  // استخدام useRef لتخزين دالة إلغاء الاشتراك (unsubscribe)
+  const userSubRef = useRef<null | (() => void)>(null);
+  
   useEffect(() => {
-    let userSubUnsubscribe: () => void = () => {};
-    
     const authUnsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
+      
+      // إلغاء أي اشتراك قديم عند تغيير حالة تسجيل الدخول
+      if (userSubRef.current) {
+        userSubRef.current();
+        userSubRef.current = null;
+      }
+
       if (user) {
         setIsAuthChecking(true);
         
-        const profile = await loadStats(user.uid);
-        
-        if (!profile) {
-            const isTeacher = await isTeacherByEmail(user.email || '');
-            if (!isTeacher) {
-                await createOrUpdatePlayerProfile(user.uid, user.email || '', user.displayName || '');
-                const newProfile = await loadStats(user.uid);
-                setCurrentUserData(newProfile);
-            }
-        } else {
-            setCurrentUserData(profile);
-        }
-        
-        userSubUnsubscribe = subscribeToUserStats(user.uid, (data) => {
-          if (data) {
-            setCurrentUserData(data);
-            setIsAuthChecking(false);
+        try {
+          // محاولة جلب البيانات الأولية فوراً
+          const profile = await loadStats(user.uid);
+          
+          if (!profile) {
+              // إذا لم يوجد بروفايل، نتحقق من حالة المعلم أولاً
+              const teacherProfile = await isTeacherByEmail(user.email || '');
+              if (!teacherProfile) {
+                  // طالب جديد: نقوم بإنشاء ملفه
+                  await createOrUpdatePlayerProfile(user.uid, user.email || '', user.displayName || '');
+              }
+              // سيقوم الاشتراك الحي بالباقي
+          } else {
+              setCurrentUserData(profile);
           }
-        });
+          
+          // البدء في الاشتراك الحي للبيانات لضمان التحديث اللحظي
+          userSubRef.current = subscribeToUserStats(user.uid, (data) => {
+            if (data) {
+              setCurrentUserData(data);
+              // ننتهي من حالة التحميل فقط عند وصول البيانات بنجاح من Firestore
+              setIsAuthChecking(false);
+            }
+          });
 
-        const timer = setTimeout(() => {
-            setIsAuthChecking(false);
-        }, 4000);
-        return () => clearTimeout(timer);
+        } catch (error) {
+          console.error("Auth initialization error:", error);
+          setIsAuthChecking(false);
+        }
       } else {
         setCurrentUserData(null);
-        userSubUnsubscribe();
         setIsAuthChecking(false);
       }
     });
 
     return () => {
       authUnsubscribe();
-      userSubUnsubscribe();
+      if (userSubRef.current) {
+        userSubRef.current();
+      }
     };
   }, []);
 
@@ -99,9 +113,15 @@ const App: React.FC = () => {
   const handleRestart = () => setAppState(AppState.WELCOME);
 
   if (isAuthChecking) return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-indigo-50 font-bold text-indigo-600 gap-4">
-      <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-      جاري مزامنة بيانات البطل...
+    <div className="min-h-screen flex flex-col items-center justify-center bg-indigo-50 font-bold text-indigo-600 gap-6">
+      <div className="relative">
+        <div className="w-16 h-16 border-4 border-indigo-200 rounded-full"></div>
+        <div className="w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin absolute top-0"></div>
+      </div>
+      <div className="flex flex-col items-center gap-2">
+        <p className="text-xl animate-pulse">جاري تحضير فصل الأبطال...</p>
+        <p className="text-xs text-indigo-400 font-medium tracking-widest">تحديث البيانات من السحابة</p>
+      </div>
     </div>
   );
 

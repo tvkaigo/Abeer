@@ -8,7 +8,7 @@ import {
     updateProfile,
     signOut
 } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, updateDoc } from 'firebase/firestore';
 import { TeacherProfile } from '../types';
 
 interface UserEntryModalProps {
@@ -46,6 +46,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
         });
     } else {
         setError('');
+        setPassword('');
     }
   }, [mode]);
 
@@ -54,26 +55,35 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
     if (isLoading) return;
 
     setError('');
+    const cleanEmail = email.trim().toLowerCase();
+    
+    if (password.length < 6) {
+      setError("كلمة المرور يجب ألا تقل عن 6 أحرف");
+      return;
+    }
+
     setIsLoading(true);
 
     try {
-      const cleanEmail = email.trim().toLowerCase();
-      
       if (mode === 'teacher') {
-        const exists = await isTeacherByEmail(cleanEmail);
-        if (!exists) {
-            throw new Error("هذا البريد الإلكتروني غير مسجل كمعلم معتمد.");
-        }
-
+        // 1. تسجيل الدخول أولاً (Auth First) لضمان امتلاك صلاحيات القراءة من Firestore
         const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, password);
         
-        // ربط الـ Auth UID بوثيقة المعلم في /Teachers/{teacherId}
-        const teacherDocRef = doc(db, 'Teachers', cleanEmail);
-        await setDoc(teacherDocRef, { 
+        // 2. التحقق من وجود المعلم في قاعدة البيانات بعد تسجيل الدخول
+        const teacherProfile = await isTeacherByEmail(cleanEmail);
+        
+        if (!teacherProfile) {
+            // إذا لم يكن معلماً، سجل خروجه فوراً
+            await signOut(auth);
+            throw new Error("عذراً، هذا الحساب ليس له ملف تعريف معلم معتمد.");
+        }
+
+        // 3. ربط UID الوثيقة (أول مرة أو للتحديث)
+        const teacherDocRef = doc(db, 'Teachers', teacherProfile.teacherId);
+        await updateDoc(teacherDocRef, { 
             uid: userCredential.user.uid, 
-            lastActive: new Date().toISOString(),
-            active: true
-        }, { merge: true });
+            lastActive: new Date().toISOString()
+        });
 
         onSuccess();
       } else if (mode === 'signup') {
@@ -81,33 +91,33 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
         if (!nameToSave) throw new Error("يرجى إدخال اسمك بالعربية");
         if (!teacherId) throw new Error("يرجى اختيار معلمك من القائمة");
         
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        await createOrUpdatePlayerProfile(userCredential.user.uid, email, nameToSave, teacherId);
+        const userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+        await createOrUpdatePlayerProfile(userCredential.user.uid, cleanEmail, nameToSave, teacherId);
         await updateProfile(userCredential.user, { displayName: nameToSave });
         onSuccess();
       } else {
-        await signInWithEmailAndPassword(auth, email, password);
+        // تسجيل دخول الطالب العادي
+        await signInWithEmailAndPassword(auth, cleanEmail, password);
         onSuccess();
       }
     } catch (err: any) {
-      console.error("Login Error:", err);
+      console.error("Auth Action Error:", err);
       let msg = "حدث خطأ ما، يرجى المحاولة مرة أخرى";
       if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        msg = "بيانات الدخول غير صحيحة. تأكد من البريد وكلمة المرور الممنوحة لك.";
+        msg = "بيانات الدخول غير صحيحة. يرجى التأكد من البريد وكلمة المرور الممنوحة لك.";
       } else if (err.code === 'auth/email-already-in-use') {
-        msg = "هذا البريد الإلكتروني مستخدم بالفعل.";
+        msg = "هذا البريد الإلكتروني مستخدم بالفعل في حساب آخر.";
       } else if (err.message) {
         msg = err.message;
       }
       setError(msg);
-      if (mode === 'teacher' && auth.currentUser) await signOut(auth);
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-lg">
       <div className="bg-white rounded-[2.5rem] shadow-2xl p-8 max-w-md w-full border-4 border-indigo-50 relative overflow-hidden animate-pop-in">
         <div className={`absolute top-0 left-0 w-full h-2 bg-gradient-to-r ${mode === 'teacher' ? 'from-purple-500 via-fuchsia-500 to-pink-500' : 'from-indigo-500 via-blue-500 to-cyan-500'}`}></div>
         
@@ -119,7 +129,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
              {mode === 'teacher' ? 'بوابة المعلم' : 'العبقري الصغير'}
           </h2>
           <p className="text-slate-500 mt-2 font-medium">
-            {mode === 'login' ? 'سجل دخولك لمتابعة تقدمك' : mode === 'signup' ? 'أنشئ حساباً جديداً لتبدأ رحلتك' : 'ادخل باستخدام بيانات المعلم الممنوحة لك'}
+            {mode === 'login' ? 'سجل دخولك لمتابعة تقدمك' : mode === 'signup' ? 'أنشئ حساباً جديداً لتبدأ رحلتك' : 'ادخل ببيانات المعلم الممنوحة لك'}
           </p>
         </div>
 
@@ -171,7 +181,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
 
           {mode === 'teacher' && (
             <div className="bg-purple-50 text-purple-700 p-4 rounded-2xl text-xs font-bold border border-purple-100">
-              <Info className="inline-block ml-2" size={16} /> ادخل بالبريد والسر الممنوحين لك من الإدارة.
+              <Info className="inline-block ml-2" size={16} /> استخدم البريد وكلمة المرور المسلمين لك من الإدارة.
             </div>
           )}
 

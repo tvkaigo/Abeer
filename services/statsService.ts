@@ -68,9 +68,6 @@ export const getBadgeDefinitions = (totalCorrect: number): Badge[] => [
   { id: 4, name: 'الأسطورة', required: 300, icon: '🏆', unlocked: totalCorrect >= 300, color: 'text-yellow-600 bg-yellow-100 border-yellow-200' },
 ];
 
-/**
- * جلب بيانات المستخدم مع تحويل teacherId من Reference إلى string ID للواجهة
- */
 export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile | null> => {
   if (!uid) return null;
   
@@ -80,8 +77,6 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
     if (studentSnap.exists()) {
       const data = studentSnap.data();
       let teacherIdStr = '';
-      
-      // الكشف عن نوع teacherId: إذا كان Reference نستخرج المعرف
       if (data.teacherId && typeof data.teacherId !== 'string') {
         teacherIdStr = (data.teacherId as DocumentReference).id;
       } else {
@@ -96,7 +91,6 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
       } as UserStats;
     }
     
-    // البحث عن المعلم
     const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
     const tSnap = await getDocs(q);
     if (!tSnap.empty) {
@@ -114,23 +108,24 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
   return null;
 };
 
-/**
- * التحقق من وجود المعلم في مسار /Teachers/{email}
- */
-export const isTeacherByEmail = async (email: string): Promise<boolean> => {
-    if (!email) return false;
+export const isTeacherByEmail = async (email: string): Promise<TeacherProfile | null> => {
+    if (!email) return null;
     try {
       const docRef = doc(db, TEACHERS_COLLECTION, email.trim().toLowerCase());
       const snap = await getDoc(docRef);
-      return snap.exists() && snap.data()?.active !== false;
-    } catch {
-      return false;
+      if (snap.exists() && snap.data()?.active !== false) {
+          return {
+              teacherId: snap.id,
+              ...snap.data()
+          } as TeacherProfile;
+      }
+      return null;
+    } catch (err) {
+      console.error("Check teacher error:", err);
+      return null;
     }
 };
 
-/**
- * جلب بيانات المعلم (الاسم والبريد) من مسار /Teachers/{teacherId}
- */
 export const fetchTeacherInfo = async (teacherId: string): Promise<TeacherProfile | null> => {
   if (!teacherId) return null;
   try {
@@ -167,17 +162,16 @@ export const fetchAllTeachers = async (): Promise<TeacherProfile[]> => {
 };
 
 export const subscribeToUserStats = (uid: string, callback: (stats: any) => void) => {
-  const studentSub = onSnapshot(doc(db, USERS_COLLECTION, uid), async (docSnap) => {
+  // مراقبة وثيقة الطالب
+  const unsubStudent = onSnapshot(doc(db, USERS_COLLECTION, uid), (docSnap) => {
     if (docSnap.exists()) {
       const data = docSnap.data();
       let teacherIdStr = '';
-      
       if (data.teacherId && typeof data.teacherId !== 'string') {
         teacherIdStr = (data.teacherId as DocumentReference).id;
       } else {
         teacherIdStr = data.teacherId || '';
       }
-
       callback({ 
           ...data, 
           uid: docSnap.id, 
@@ -185,29 +179,24 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
           badges: getBadgeDefinitions(data.totalCorrect || 0) 
       });
     } else {
+        // إذا لم يكن طالباً، نبحث عنه في مجموعة المعلمين (باستخدام UID المربوط)
         const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
-        const tSnap = await getDocs(q);
-        if (!tSnap.empty) {
-          const docData = tSnap.docs[0].data();
-          callback({ ...docData, teacherId: tSnap.docs[0].id, role: UserRole.TEACHER });
-        }
+        getDocs(q).then(tSnap => {
+            if (!tSnap.empty) {
+                const docSnap = tSnap.docs[0];
+                callback({ ...docSnap.data(), teacherId: docSnap.id, role: UserRole.TEACHER });
+            }
+        });
     }
-  }, (error) => {
-    console.error("Subscription error:", error);
   });
   
-  return studentSub;
+  return unsubStudent;
 };
 
-/**
- * إنشاء ملف طالب وحفظ teacherId كـ Reference
- */
 export const createOrUpdatePlayerProfile = async (uid: string, email: string, displayName: string, teacherId?: string) => {
     const studentRef = doc(db, USERS_COLLECTION, uid);
     try {
       const snap = await getDoc(studentRef);
-      
-      // تحويل المعرف النصي إلى Reference قبل الحفظ ليكون متوافقاً مع قواعد البيانات
       const teacherRef = teacherId ? doc(db, TEACHERS_COLLECTION, teacherId.trim()) : null;
       
       if (!snap.exists()) {
@@ -216,7 +205,7 @@ export const createOrUpdatePlayerProfile = async (uid: string, email: string, di
               email: email.trim().toLowerCase(), 
               displayName: displayName || 'لاعب جديد', 
               role: UserRole.STUDENT, 
-              teacherId: teacherRef, // يتم الحفظ كـ DocumentReference
+              teacherId: teacherRef,
               totalCorrect: 0, 
               totalIncorrect: 0, 
               streak: 0, 
@@ -235,78 +224,46 @@ export const createOrUpdatePlayerProfile = async (uid: string, email: string, di
 export const updateUserStats = async (result: GameResult, uid: string) => {
     const today = getLocalDateString();
     const userRef = doc(db, USERS_COLLECTION, uid);
-    
     try {
       let snap = await getDoc(userRef);
-      if (!snap.exists()) {
-          const user = auth.currentUser;
-          if (user) {
-              await createOrUpdatePlayerProfile(uid, user.email || '', user.displayName || '');
-              snap = await getDoc(userRef);
-          } else {
-              return;
-          }
-      }
-      
+      if (!snap.exists()) return;
       const data = snap.data();
-      if (!data) return;
-      
       const dailyHistory = data.dailyHistory || {};
       const todayStats = dailyHistory[today] || { date: today, correct: 0, incorrect: 0 };
-      
       todayStats.correct += result.score;
       todayStats.incorrect += (result.totalQuestions - result.score);
-
       const totalCorrectNow = (data.totalCorrect || 0) + result.score;
       const badgesCount = getBadgeDefinitions(totalCorrectNow).filter(b => b.unlocked).length;
-
-      await setDoc(userRef, {
+      await updateDoc(userRef, {
           totalCorrect: increment(result.score),
           totalIncorrect: increment(result.totalQuestions - result.score),
           lastActive: new Date().toISOString(),
           lastPlayedDate: today,
           badgesCount: badgesCount,
-          dailyHistory: {
-              ...dailyHistory,
-              [today]: todayStats
-          }
-      }, { merge: true });
+          dailyHistory: { ...dailyHistory, [today]: todayStats }
+      });
     } catch (e) {
       console.error("Error in updateUserStats:", e);
-      throw e;
     }
 };
 
-/**
- * الاشتراك في لوحة المتصدرين باستخدام مرجع المعلم في الاستعلام
- */
 export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => void, teacherId: string) => {
   if (!teacherId || teacherId === 'none') {
     callback([]);
     return () => {};
   }
-
-  // بناء مرجع الوثيقة للاستعلام به في Firestore
   const teacherRef = doc(db, TEACHERS_COLLECTION, teacherId.trim());
-
-  const q = query(
-    collection(db, USERS_COLLECTION),
-    where("teacherId", "==", teacherRef)
-  );
-
+  const q = query(collection(db, USERS_COLLECTION), where("teacherId", "==", teacherRef));
   const unsubscribe = onSnapshot(q, (snapshot) => {
     const students: LeaderboardEntry[] = [];
     snapshot.forEach(docSnap => {
       const data = docSnap.data();
       let tid = '';
-      
-      // تحويل المرجع القادم من Firestore إلى نص لاستخدامه في الـ State
       if (data.teacherId && typeof data.teacherId !== 'string') {
           tid = (data.teacherId as DocumentReference).id;
       } else {
           tid = data.teacherId || '';
       }
-
       students.push({ 
         uid: docSnap.id, 
         displayName: data.displayName || 'لاعب',
@@ -322,22 +279,17 @@ export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => v
     console.error("Leaderboard subscription error:", error);
     callback([]);
   });
-
   return unsubscribe;
 };
 
 export const updateUserProfileName = async (uid: string, newName: string, role: UserRole, teacherId?: string): Promise<void> => {
     const user = auth.currentUser;
     if (!user) throw new Error("يجب تسجيل الدخول أولاً");
-
     await updateProfile(user, { displayName: newName });
-
     if (role === UserRole.STUDENT) {
-        const studentRef = doc(db, USERS_COLLECTION, uid);
-        await updateDoc(studentRef, { displayName: newName });
+        await updateDoc(doc(db, USERS_COLLECTION, uid), { displayName: newName });
     } else if (role === UserRole.TEACHER && teacherId) {
-        const teacherRef = doc(db, TEACHERS_COLLECTION, teacherId);
-        await updateDoc(teacherRef, { displayName: newName });
+        await updateDoc(doc(db, TEACHERS_COLLECTION, teacherId), { displayName: newName });
     }
 };
 
