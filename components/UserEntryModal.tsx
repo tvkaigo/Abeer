@@ -1,15 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
 import { User, Mail, Lock, LogIn, UserPlus, Loader2, AlertCircle, UserCheck, ChevronDown, GraduationCap, Info, Sparkles, Send, CheckCircle2 } from 'lucide-react';
-import { auth, createOrUpdatePlayerProfile, fetchAllTeachers, isTeacherByEmail, db, loginAnonymously } from '../services/statsService';
+import { auth, createOrUpdatePlayerProfile, fetchAllTeachers, isTeacherByEmail, activateTeacherAccount, loadStats, loginAnonymously } from '../services/statsService';
 import { 
     signInWithEmailAndPassword, 
     createUserWithEmailAndPassword, 
-    updateProfile,
-    signOut,
-    sendPasswordResetEmail
+    updateProfile
 } from 'firebase/auth';
-import { doc, updateDoc } from 'firebase/firestore';
 import { TeacherProfile } from '../types';
 
 interface UserEntryModalProps {
@@ -37,17 +34,12 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
     try {
         await loginAnonymously();
         const list = await fetchAllTeachers();
-        
-        // فلترة العناصر بدون displayName لضمان عرض المعلمين الفعليين فقط
         const validTeachers = list.filter(t => t.displayName);
-        
-        // الفرز بعد التأكد من وجود الاسم
         const sorted = validTeachers.sort((a, b) => a.displayName.localeCompare(b.displayName, 'ar'));
-        
         setTeachers(sorted);
     } catch (err) {
         console.error("Failed to load teachers:", err);
-        setError("عذراً، لم نتمكن من جلب قائمة المعلمين. تأكد من اتصالك بالإنترنت.");
+        setError("عذراً، لم نتمكن من جلب قائمة المعلمين.");
     } finally {
         setIsFetchingTeachers(false);
     }
@@ -70,44 +62,43 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
     const cleanEmail = email.trim().toLowerCase();
     const cleanName = displayName.trim();
 
-    // خاص بالمعلم: إرسال رابط الدخول فقط
-    if (mode === 'teacher') {
-        if (!isValidEmail(cleanEmail)) {
-            setError("يرجى إدخال بريد إلكتروني صحيح.");
-            return;
-        }
-        setIsLoading(true);
-        try {
-            const teacherProfile = await isTeacherByEmail(cleanEmail);
-            if (!teacherProfile) {
-                throw { code: 'custom/not-a-teacher' };
-            }
-            // إرسال رابط إعادة تعيين كلمة المرور كرابط دخول آمن
-            await sendPasswordResetEmail(auth, cleanEmail);
-            setSuccess("تم إرسال رابط الدخول الآمن إلى بريدك الإلكتروني بنجاح. يرجى مراجعة بريدك للبدء.");
-        } catch (err: any) {
-            handleAuthError(err);
-        } finally {
-            setIsLoading(false);
-        }
-        return;
-    }
-
-    // خاص بالطالب
     if (password.length < 6) {
-        setError("كلمة المرور يجب أن تتكون من 6 خانات على الأقل لضمان حماية حسابك.");
-        return;
-    }
-
-    if (mode === 'signup' && (!cleanName || !teacherId)) {
-        setError("يرجى كتابة اسمك واختيار المعلم لتتمكن من الانضمام للفصل.");
+        setError("كلمة المرور يجب أن تتكون من 6 خانات على الأقل.");
         return;
     }
 
     setIsLoading(true);
 
     try {
-      if (mode === 'signup') {
+      if (mode === 'teacher') {
+        // تسجيل دخول المعلم بكلمة المرور المعطاة من الإدارة
+        const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, password);
+        const user = userCredential.user;
+
+        // البحث عن ملف المعلم في Firestore للتأكد من أنه مسجل مسبقاً من قبل الإدارة
+        const teacherProfile = await isTeacherByEmail(cleanEmail);
+        
+        if (teacherProfile) {
+            // إذا كان الدخول الأول (الحساب غير نشط)، نقوم بتفعيله وربطه بـ UID الخاص بالدخول
+            if (!teacherProfile.active) {
+                await activateTeacherAccount(teacherProfile.teacherId, user.uid);
+                setSuccess("تم تفعيل حسابك بنجاح! أهلاً بك في منصة العبقري الصغير.");
+                // تأخير بسيط لعرض رسالة النجاح
+                setTimeout(() => onSuccess(), 1500);
+            } else {
+                // الحساب نشط بالفعل، فقط ننتقل للداخل
+                onSuccess();
+            }
+        } else {
+            // إذا لم يتم العثور على ملف في Firestore رغم نجاح الدخول في Auth
+            throw { code: 'custom/not-a-teacher' };
+        }
+      } else if (mode === 'signup') {
+        if (!cleanName || !teacherId) {
+            setError("يرجى كتابة اسمك واختيار المعلم.");
+            setIsLoading(false);
+            return;
+        }
         const userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
         await updateProfile(userCredential.user, { displayName: cleanName });
         await createOrUpdatePlayerProfile(userCredential.user.uid, cleanEmail, cleanName, teacherId);
@@ -119,7 +110,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
     } catch (err: any) {
       handleAuthError(err);
     } finally {
-      setIsLoading(false);
+      if (!success) setIsLoading(false);
     }
   };
 
@@ -128,31 +119,16 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
     let msg = "حدث خطأ غير متوقع، يرجى المحاولة مرة أخرى.";
     switch (err.code) {
       case 'auth/user-not-found':
-        msg = "لم نجد حساباً بهذا البريد الإلكتروني. هل أنت متأكد من كتابته بشكل صحيح؟";
+        msg = "لم نجد حساباً بهذا البريد الإلكتروني.";
         break;
       case 'auth/wrong-password':
-        msg = "كلمة المرور التي أدخلتها غير صحيحة. يرجى التأكد منها والمحاولة ثانية.";
-        break;
-      case 'auth/invalid-email':
-        msg = "صيغة البريد الإلكتروني غير صحيحة. يرجى كتابة بريد إلكتروني حقيقي.";
-        break;
-      case 'auth/email-already-in-use':
-        msg = "هذا البريد الإلكتروني مسجل لدينا بالفعل. هل جربت تسجيل الدخول بدلاً من التسجيل؟";
-        break;
-      case 'auth/weak-password':
-        msg = "كلمة المرور ضعيفة جداً، يرجى استخدام 6 أحرف أو أرقام على الأقل.";
+        msg = "كلمة المرور التي أدخلتها غير صحيحة.";
         break;
       case 'auth/invalid-credential':
         msg = "بيانات الدخول غير صحيحة. يرجى التأكد من البريد وكلمة المرور.";
         break;
-      case 'auth/network-request-failed':
-        msg = "يبدو أن هناك مشكلة في الاتصال بالإنترنت. يرجى التحقق من اتصالك.";
-        break;
-      case 'auth/too-many-requests':
-        msg = "لقد قمت بمحاولات كثيرة خاطئة. تم حظر الدخول مؤقتاً لحماية حسابك، يرجى المحاولة بعد قليل.";
-        break;
       case 'custom/not-a-teacher':
-        msg = "عذراً، هذا البريد غير مسجل كمعلم في النظام. يرجى التواصل مع الإدارة.";
+        msg = "عذراً، هذا الحساب ليس مسجلاً كمعلم في نظامنا. يرجى مراجعة الإدارة.";
         break;
       default:
         break;
@@ -173,7 +149,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
              {mode === 'teacher' ? 'بوابة المعلم' : 'العبقري الصغير'}
           </h2>
           <p className="text-slate-500 mt-2 font-medium">
-            {mode === 'login' ? 'مرحباً بعودتك يا بطل!' : mode === 'signup' ? 'سجل الآن لتنضم لعالم الأبطال' : 'بوابة تسجيل المعلمين'}
+            {mode === 'login' ? 'مرحباً بعودتك يا بطل!' : mode === 'signup' ? 'سجل الآن لتنضم لعالم الأبطال' : 'الدخول بكلمة المرور الممنوحة لك'}
           </p>
         </div>
 
@@ -184,7 +160,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* حقل الاسم: معطل للمعلم */}
+          {/* حقل الاسم: معطل للمعلم لأن الإدارة حددته مسبقاً */}
           {(mode === 'signup' || mode === 'teacher') && (
             <div className={`animate-fade-in-up ${mode === 'teacher' ? 'opacity-50' : ''}`}>
                 <label className="block text-slate-700 font-bold mb-1.5 text-xs mr-2">الاسم المعروض</label>
@@ -193,7 +169,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
                       type="text" 
                       required={mode === 'signup'} 
                       disabled={mode === 'teacher'}
-                      value={mode === 'teacher' ? 'يتم التوثيق عبر البريد' : displayName} 
+                      value={mode === 'teacher' ? 'الاسم محدد مسبقاً' : displayName} 
                       onChange={(e) => setDisplayName(e.target.value)} 
                       placeholder="اسمك بالعربية" 
                       className={`w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 outline-none pr-12 font-bold ${mode === 'teacher' ? 'bg-slate-200 cursor-not-allowed italic' : 'focus:border-indigo-500 bg-slate-50'}`} 
@@ -211,19 +187,17 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
             </div>
           </div>
 
-          {/* حقل كلمة المرور: معطل للمعلم */}
-          <div className={`animate-fade-in-up ${mode === 'teacher' ? 'opacity-50' : ''}`}>
+          <div className="animate-fade-in-up">
             <label className="block text-slate-700 font-bold mb-1.5 text-xs mr-2">كلمة المرور</label>
             <div className="relative">
               <input 
                 type="password" 
-                required={mode !== 'teacher'} 
-                disabled={mode === 'teacher'}
+                required 
                 dir="ltr" 
-                value={mode === 'teacher' ? '********' : password} 
+                value={password} 
                 onChange={(e) => setPassword(e.target.value)} 
                 placeholder="••••••••" 
-                className={`w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 outline-none pr-12 text-right ${mode === 'teacher' ? 'bg-slate-200 cursor-not-allowed' : 'focus:border-indigo-500 bg-slate-50'}`} 
+                className="w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 focus:border-indigo-500 outline-none pr-12 text-right bg-slate-50" 
               />
               <Lock className="absolute right-4 top-3.5 text-slate-400" size={20} />
             </div>
@@ -247,8 +221,8 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
             <div className="bg-purple-50 text-purple-700 p-4 rounded-2xl text-xs font-bold border border-purple-100 flex items-start gap-2 animate-fade-in">
               <Info className="shrink-0 mt-0.5" size={16} /> 
               <div className="leading-relaxed">
-                <p className="mb-1 text-purple-900">نظام الدخول الآمن للمعلمين:</p>
-                <p className="opacity-80">أدخل بريدك الإلكتروني المسجل وسنقوم بإرسال رابط دخول آمن فورياً إلى بريدك. لا حاجة لاستخدام كلمة مرور تقليدية في هذه الخطوة لضمان أعلى مستويات الأمان.</p>
+                <p className="mb-1 text-purple-900">تنبيه للمعلم:</p>
+                <p className="opacity-80">استخدم البريد وكلمة المرور التي زودتك بها الإدارة. عند دخولك الأول، سيتم تنشيط حسابك تلقائياً لتظهر لطلابك في قائمة التسجيل.</p>
               </div>
             </div>
           )}
@@ -269,15 +243,13 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
 
           <button 
             type="submit" 
-            disabled={isLoading || (mode === 'signup' && isFetchingTeachers) || (mode === 'teacher' && !isValidEmail(email))} 
+            disabled={isLoading || (mode === 'signup' && isFetchingTeachers)} 
             className={`w-full text-white font-black py-4 rounded-2xl shadow-xl transition-all flex items-center justify-center gap-2 mt-4 disabled:opacity-50 disabled:cursor-not-allowed ${mode === 'teacher' ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-200' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'}`}
           >
             {isLoading ? <Loader2 className="animate-spin" size={24} /> : 
              mode === 'signup' ? 'إنشاء حساب جديد' : 
-             mode === 'teacher' ? (
-                <>إرسال رابط الدخول <Send size={18} className="mr-2" /></>
-             ) : 'انطلق الآن'}
-            {mode !== 'teacher' && !isLoading && <LogIn size={20} className="rotate-180" />}
+             mode === 'teacher' ? 'تسجيل دخول المعلم' : 'انطلق الآن'}
+            {!isLoading && <LogIn size={20} className="rotate-180" />}
           </button>
         </form>
       </div>
