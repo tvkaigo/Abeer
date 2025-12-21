@@ -1,12 +1,13 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, Mail, Lock, LogIn, UserPlus, Loader2, AlertCircle, UserCheck, ChevronDown, GraduationCap, Info, Sparkles } from 'lucide-react';
-import { auth, createOrUpdatePlayerProfile, fetchAllTeachers, isTeacherByEmail, db } from '../services/statsService';
+import { User, Mail, Lock, LogIn, UserPlus, Loader2, AlertCircle, UserCheck, ChevronDown, GraduationCap, Info, Sparkles, Send, CheckCircle2 } from 'lucide-react';
+import { auth, createOrUpdatePlayerProfile, fetchAllTeachers, isTeacherByEmail, db, loginAnonymously } from '../services/statsService';
 import { 
     signInWithEmailAndPassword, 
     createUserWithEmailAndPassword, 
     updateProfile,
-    signOut
+    signOut,
+    sendPasswordResetEmail
 } from 'firebase/auth';
 import { doc, updateDoc } from 'firebase/firestore';
 import { TeacherProfile } from '../types';
@@ -23,24 +24,34 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
   const [teacherId, setTeacherId] = useState('');
   const [teachers, setTeachers] = useState<TeacherProfile[]>([]);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isFetchingTeachers, setIsFetchingTeachers] = useState(false);
 
+  const isValidEmail = (email: string) => {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  };
+
+  const loadTeachersList = async () => {
+    setIsFetchingTeachers(true);
+    try {
+        await loginAnonymously();
+        const list = await fetchAllTeachers();
+        const sorted = list.sort((a, b) => a.displayName.localeCompare(b.displayName, 'ar'));
+        setTeachers(sorted);
+    } catch (err) {
+        console.error("Failed to load teachers:", err);
+        setError("عذراً، لم نتمكن من جلب قائمة المعلمين. تأكد من اتصالك بالإنترنت.");
+    } finally {
+        setIsFetchingTeachers(false);
+    }
+  };
+
   useEffect(() => {
-    // جلب قائمة المعلمين فور اختيار وضع التسجيل
+    setError('');
+    setSuccess('');
     if (mode === 'signup') {
-        setIsFetchingTeachers(true);
-        fetchAllTeachers().then(list => {
-            const sorted = list.sort((a, b) => a.displayName.localeCompare(b.displayName, 'ar'));
-            setTeachers(sorted);
-            setIsFetchingTeachers(false);
-        }).catch((err) => {
-            console.error("Error fetching teachers:", err);
-            setError("فشل تحميل قائمة المعلمين. قد تحتاج لتحديث الصفحة.");
-            setIsFetchingTeachers(false);
-        });
-    } else {
-        setError('');
+        loadTeachersList();
     }
   }, [mode]);
 
@@ -48,70 +59,99 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
     e.preventDefault();
     if (isLoading) return;
     setError('');
+    setSuccess('');
 
     const cleanEmail = email.trim().toLowerCase();
     const cleanName = displayName.trim();
 
-    // التحقق من البيانات الأساسية
+    // خاص بالمعلم: إرسال رابط الدخول فقط
+    if (mode === 'teacher') {
+        if (!isValidEmail(cleanEmail)) {
+            setError("يرجى إدخال بريد إلكتروني صحيح.");
+            return;
+        }
+        setIsLoading(true);
+        try {
+            const teacherProfile = await isTeacherByEmail(cleanEmail);
+            if (!teacherProfile) {
+                throw { code: 'custom/not-a-teacher' };
+            }
+            // إرسال رابط إعادة تعيين كلمة المرور كرابط دخول آمن
+            await sendPasswordResetEmail(auth, cleanEmail);
+            setSuccess("تم إرسال رابط الدخول الآمن إلى بريدك الإلكتروني بنجاح. يرجى مراجعة بريدك.");
+        } catch (err: any) {
+            handleAuthError(err);
+        } finally {
+            setIsLoading(false);
+        }
+        return;
+    }
+
+    // خاص بالطالب
     if (password.length < 6) {
-        setError("كلمة المرور يجب ألا تقل عن 6 أحرف");
+        setError("كلمة المرور يجب أن تتكون من 6 خانات على الأقل لضمان حماية حسابك.");
         return;
     }
 
     if (mode === 'signup' && (!cleanName || !teacherId)) {
-        setError("يرجى إكمال جميع الحقول واختيار المعلم");
+        setError("يرجى كتابة اسمك واختيار المعلم لتتمكن من الانضمام للفصل.");
         return;
     }
 
     setIsLoading(true);
 
     try {
-      if (mode === 'teacher') {
-        // دخول المعلم
-        const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, password);
-        const teacherProfile = await isTeacherByEmail(cleanEmail);
-        if (!teacherProfile) {
-            await signOut(auth);
-            throw new Error("عذراً، هذا الحساب ليس مسجلاً كمعلم معتمد.");
-        }
-        await updateDoc(doc(db, 'Teachers', teacherProfile.teacherId), { 
-            uid: userCredential.user.uid, 
-            lastActive: new Date().toISOString()
-        });
-        onSuccess();
-      } else if (mode === 'signup') {
-        // إنشاء حساب طالب جديد (عملية واحدة)
+      if (mode === 'signup') {
         const userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
         await updateProfile(userCredential.user, { displayName: cleanName });
-        // ربط المعلم وحفظ البيانات في Firestore
         await createOrUpdatePlayerProfile(userCredential.user.uid, cleanEmail, cleanName, teacherId);
         onSuccess();
       } else {
-        // تسجيل دخول طالب موجود
         await signInWithEmailAndPassword(auth, cleanEmail, password);
         onSuccess();
       }
     } catch (err: any) {
-      console.error("Auth Error:", err);
-      let msg = "حدث خطأ غير متوقع. يرجى المحاولة ثانية.";
-      
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        msg = "بيانات الدخول غير صحيحة.";
-      } else if (err.code === 'auth/email-already-in-use') {
-        msg = "هذا البريد الإلكتروني مسجل مسبقاً.";
-      } else if (err.message) {
-        msg = err.message;
-      }
-      
-      // في حال وجود خطأ في الصلاحيات أثناء التسجيل (قواعد Firestore)
-      if (err.message && err.message.includes('permissions')) {
-          msg = "حدث خطأ أثناء حفظ بياناتك. يرجى إبلاغ المعلم.";
-      }
-      
-      setError(msg);
+      handleAuthError(err);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleAuthError = (err: any) => {
+    console.error("Auth Action Error:", err);
+    let msg = "حدث خطأ غير متوقع، يرجى المحاولة مرة أخرى.";
+    switch (err.code) {
+      case 'auth/user-not-found':
+        msg = "لم نجد حساباً بهذا البريد الإلكتروني. هل أنت متأكد من كتابته بشكل صحيح؟";
+        break;
+      case 'auth/wrong-password':
+        msg = "كلمة المرور التي أدخلتها غير صحيحة. يرجى التأكد منها والمحاولة ثانية.";
+        break;
+      case 'auth/invalid-email':
+        msg = "صيغة البريد الإلكتروني غير صحيحة. يرجى كتابة بريد إلكتروني حقيقي.";
+        break;
+      case 'auth/email-already-in-use':
+        msg = "هذا البريد الإلكتروني مسجل لدينا بالفعل. هل جربت تسجيل الدخول بدلاً من التسجيل؟";
+        break;
+      case 'auth/weak-password':
+        msg = "كلمة المرور ضعيفة جداً، يرجى استخدام 6 أحرف أو أرقام على الأقل.";
+        break;
+      case 'auth/invalid-credential':
+        msg = "بيانات الدخول غير صحيحة. يرجى التأكد من البريد وكلمة المرور.";
+        break;
+      case 'auth/network-request-failed':
+        msg = "يبدو أن هناك مشكلة في الاتصال بالإنترنت. يرجى التحقق من اتصالك.";
+        break;
+      case 'auth/too-many-requests':
+        msg = "لقد قمت بمحاولات كثيرة خاطئة. تم حظر الدخول مؤقتاً لحماية حسابك، يرجى المحاولة بعد قليل.";
+        break;
+      case 'custom/not-a-teacher':
+        msg = "عذراً، هذا البريد غير مسجل كمعلم في النظام. يرجى التواصل مع الإدارة.";
+        break;
+      default:
+        break;
+    }
+    setError(msg);
   };
 
   return (
@@ -138,11 +178,20 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {mode === 'signup' && (
-            <div className="animate-fade-in-up">
-                <label className="block text-slate-700 font-bold mb-1.5 text-xs mr-2">اسم البطل (بالعربية)</label>
+          {/* حقل الاسم: معطل للمعلم */}
+          {(mode === 'signup' || mode === 'teacher') && (
+            <div className={`animate-fade-in-up ${mode === 'teacher' ? 'opacity-50' : ''}`}>
+                <label className="block text-slate-700 font-bold mb-1.5 text-xs mr-2">الاسم المعروض</label>
                 <div className="relative">
-                    <input type="text" required value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="مثال: سارة أحمد" className="w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 focus:border-indigo-500 outline-none pr-12 bg-slate-50 font-bold" />
+                    <input 
+                      type="text" 
+                      required={mode === 'signup'} 
+                      disabled={mode === 'teacher'}
+                      value={mode === 'teacher' ? 'خاص بالمعلمين المسجلين' : displayName} 
+                      onChange={(e) => setDisplayName(e.target.value)} 
+                      placeholder="اسمك بالعربية" 
+                      className={`w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 outline-none pr-12 font-bold ${mode === 'teacher' ? 'bg-slate-200 cursor-not-allowed' : 'focus:border-indigo-500 bg-slate-50'}`} 
+                    />
                     <User className="absolute right-4 top-3.5 text-slate-400" size={20} />
                 </div>
             </div>
@@ -156,10 +205,20 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
             </div>
           </div>
 
-          <div>
+          {/* حقل كلمة المرور: معطل للمعلم */}
+          <div className={`animate-fade-in-up ${mode === 'teacher' ? 'opacity-50' : ''}`}>
             <label className="block text-slate-700 font-bold mb-1.5 text-xs mr-2">كلمة المرور</label>
             <div className="relative">
-              <input type="password" required dir="ltr" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" className="w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 focus:border-indigo-500 outline-none pr-12 bg-slate-50 text-right" />
+              <input 
+                type="password" 
+                required={mode !== 'teacher'} 
+                disabled={mode === 'teacher'}
+                dir="ltr" 
+                value={mode === 'teacher' ? '********' : password} 
+                onChange={(e) => setPassword(e.target.value)} 
+                placeholder="••••••••" 
+                className={`w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 outline-none pr-12 text-right ${mode === 'teacher' ? 'bg-slate-200 cursor-not-allowed' : 'focus:border-indigo-500 bg-slate-50'}`} 
+              />
               <Lock className="absolute right-4 top-3.5 text-slate-400" size={20} />
             </div>
           </div>
@@ -179,9 +238,12 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
           )}
 
           {mode === 'teacher' && (
-            <div className="bg-purple-50 text-purple-700 p-4 rounded-2xl text-xs font-bold border border-purple-100 flex items-start gap-2">
-              <Info className="shrink-0 mt-0.5" size={14} /> 
-              <span>هذه البوابة مخصصة فقط للمعلمين المسجلين مسبقاً من قِبل الإدارة.</span>
+            <div className="bg-purple-50 text-purple-700 p-4 rounded-2xl text-xs font-bold border border-purple-100 flex items-start gap-2 animate-fade-in">
+              <Info className="shrink-0 mt-0.5" size={16} /> 
+              <div className="leading-relaxed">
+                <p className="mb-1 text-purple-900">نظام الدخول الآمن للمعلمين:</p>
+                <p className="opacity-80">أدخل بريدك الإلكتروني المسجل وسنقوم بإرسال رابط دخول آمن فورياً. لا حاجة لكلمة مرور في هذه الخطوة.</p>
+              </div>
             </div>
           )}
 
@@ -192,11 +254,24 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
             </div>
           )}
 
-          <button type="submit" disabled={isLoading || (mode === 'signup' && isFetchingTeachers)} className={`w-full text-white font-black py-4 rounded-2xl shadow-xl transition-all flex items-center justify-center gap-2 mt-4 disabled:opacity-50 ${mode === 'teacher' ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-200' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'}`}>
+          {success && (
+            <div className="bg-green-50 text-green-700 p-4 rounded-2xl text-sm font-black flex items-start gap-2 border border-green-100 animate-pop-in">
+              <CheckCircle2 size={20} className="shrink-0 text-green-500" />
+              <span className="leading-relaxed">{success}</span>
+            </div>
+          )}
+
+          <button 
+            type="submit" 
+            disabled={isLoading || (mode === 'signup' && isFetchingTeachers) || (mode === 'teacher' && !isValidEmail(email))} 
+            className={`w-full text-white font-black py-4 rounded-2xl shadow-xl transition-all flex items-center justify-center gap-2 mt-4 disabled:opacity-50 disabled:cursor-not-allowed ${mode === 'teacher' ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-200' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'}`}
+          >
             {isLoading ? <Loader2 className="animate-spin" size={24} /> : 
              mode === 'signup' ? 'إنشاء حساب جديد' : 
-             mode === 'teacher' ? 'دخول المعلم' : 'انطلق الآن'}
-            <LogIn size={20} className="rotate-180" />
+             mode === 'teacher' ? (
+                <>إرسال رابط الدخول <Send size={18} className="mr-2" /></>
+             ) : 'انطلق الآن'}
+            {mode !== 'teacher' && !isLoading && <LogIn size={20} className="rotate-180" />}
           </button>
         </form>
       </div>

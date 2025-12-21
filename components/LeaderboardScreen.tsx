@@ -37,8 +37,9 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                         if (tData) setTeacherName(tData.displayName);
                     }
                 } else if (data.role === UserRole.TEACHER) {
-                    setTeacherId(data.teacherId);
-                    setTeacherName(data.displayName);
+                    const teacher = data as any; // TeacherProfile
+                    setTeacherId(teacher.teacherId);
+                    setTeacherName(teacher.displayName);
                 }
             }
         } catch (err) {
@@ -63,16 +64,12 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
       return;
     }
 
-    // يتم الآن الفلترة والاشتراك باستخدام المعرف النصي الذي سيحول لمرجع داخلياً
+    // الاشتراك في لوحة المتصدرين الخاصة بهذا المعلم فقط
     const unsubscribe = subscribeToLeaderboard((data) => {
-      // الفلترة الإضافية في الواجهة لضمان الدقة
-      const filtered = data.filter(
-        student => student.teacherId === teacherId
-      );
-
-      const sorted = [...filtered].sort(
-        (a, b) => b.totalCorrect - a.totalCorrect
-      );
+      // فرز وتصفية الطلاب المرتبطين بهذا المعلم فقط (للتأكيد)
+      const sorted = [...data]
+        .filter(entry => entry.teacherId === teacherId)
+        .sort((a, b) => b.totalCorrect - a.totalCorrect);
 
       setLeaders(sorted);
       setIsLoading(false);
@@ -174,16 +171,16 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center p-4 sm:p-8 overflow-y-auto font-sans">
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center p-4 sm:p-8 overflow-y-auto font-sans text-right">
       <div className="w-full max-w-4xl">
         <div className="flex items-center justify-between mb-12">
           <button onClick={onBack} className="bg-white p-4 rounded-3xl shadow-sm text-gray-400 hover:text-indigo-600 hover:shadow-md transition-all active:scale-90">
             <Home size={24} />
           </button>
           <div className="text-center">
-            <h1 className="text-3xl sm:text-5xl font-black text-slate-800 flex items-center justify-center gap-3">
+            <h1 className="text-3xl sm:text-5xl font-black text-slate-800 flex flex-col sm:flex-row items-center justify-center gap-3">
               <div className="bg-indigo-600 p-3 rounded-2xl text-white shadow-xl -rotate-2"><Trophy size={32} /></div>
-              أبطال فصلي
+              {teacherName ? `أبطال فصل ${teacherName}` : 'أبطال فصلي'}
             </h1>
             <div className="mt-4 flex flex-col items-center justify-center gap-3">
                 <div className="flex items-center gap-3">
@@ -193,7 +190,7 @@ const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ onBack, currentUs
                     </div>
                     {teacherName && (
                         <div className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-indigo-600 text-white border-2 border-white shadow-sm">
-                            <Users size={12} /> فصل: {teacherName}
+                            <Users size={12} /> طلابي فقط
                         </div>
                     )}
                 </div>

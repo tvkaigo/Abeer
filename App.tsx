@@ -35,27 +35,19 @@ const App: React.FC = () => {
         userSubRef.current = null;
       }
 
-      if (user) {
+      // لا نقوم بمزامنة الإحصائيات للمستخدم المجهول (ضيف)
+      if (user && !user.isAnonymous) {
         setIsAuthChecking(true);
-        
         try {
-          // نبدأ بالاشتراك مباشرة، هو سيتولى تحديث الحالة
           userSubRef.current = subscribeToUserStats(user.uid, (data) => {
             if (data) {
               setCurrentUserData(data);
               setIsAuthChecking(false);
             }
           });
-
-          // نضع مهلة زمنية للتأكد من انتهاء التحميل إذا لم توجد بيانات (مستخدم جديد جداً)
-          const timeout = setTimeout(() => {
-              setIsAuthChecking(false);
-          }, 3000);
-
+          const timeout = setTimeout(() => setIsAuthChecking(false), 2000);
           return () => clearTimeout(timeout);
-
         } catch (error) {
-          console.error("Auth initialization error:", error);
           setIsAuthChecking(false);
         }
       } else {
@@ -66,9 +58,7 @@ const App: React.FC = () => {
 
     return () => {
       authUnsubscribe();
-      if (userSubRef.current) {
-        userSubRef.current();
-      }
+      if (userSubRef.current) userSubRef.current();
     };
   }, []);
 
@@ -88,7 +78,7 @@ const App: React.FC = () => {
   const handleEndGame = async (result: GameResult) => {
     setIsSaving(true);
     setGameResult(result);
-    if (currentUser && currentUserData?.role === UserRole.STUDENT) {
+    if (currentUser && !currentUser.isAnonymous && currentUserData?.role === UserRole.STUDENT) {
         try {
             await updateUserStats(result, currentUser.uid);
         } catch (e) {
@@ -107,17 +97,17 @@ const App: React.FC = () => {
         <div className="w-16 h-16 border-4 border-indigo-200 rounded-full"></div>
         <div className="w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin absolute top-0"></div>
       </div>
-      <div className="flex flex-col items-center gap-2">
-        <p className="text-xl animate-pulse">جاري تحضير فصل الأبطال...</p>
-        <p className="text-xs text-indigo-400 font-medium tracking-widest uppercase">مزامنة البيانات الآمنة</p>
-      </div>
+      <p className="text-xl animate-pulse">جاري تحضير فصل الأبطال...</p>
     </div>
   );
 
+  // يعرض مودال الدخول إذا لم يكن هناك مستخدم، أو إذا كان المستخدم الحالي "ضيفاً مجهولاً"
+  const isRealUser = currentUser && !currentUser.isAnonymous;
+
   return (
     <div className="min-h-screen text-slate-800 font-sans">
-      {!currentUser && <UserEntryModal onSuccess={() => {}} />}
-      {currentUser && (
+      {!isRealUser && <UserEntryModal onSuccess={() => {}} />}
+      {isRealUser && (
         <>
             {appState === AppState.WELCOME && (
                 <WelcomeScreen 
@@ -133,20 +123,8 @@ const App: React.FC = () => {
                     teacherId={currentUserData?.role === UserRole.STUDENT ? (currentUserData as UserStats).teacherId : (currentUserData?.role === UserRole.TEACHER ? (currentUserData as TeacherProfile).teacherId : undefined)}
                 />
             )}
-            {appState === AppState.PROFILE && (
-              <ProfileScreen 
-                onBack={handleRestart} 
-                playerData={currentUserData} 
-                userId={currentUser.uid} 
-              />
-            )}
-            {appState === AppState.ANALYTICS && (
-              <AnalyticsScreen 
-                onBack={handleRestart} 
-                playerData={currentUserData} 
-                userId={currentUser.uid} 
-              />
-            )}
+            {appState === AppState.PROFILE && <ProfileScreen onBack={handleRestart} playerData={currentUserData} userId={currentUser.uid} />}
+            {appState === AppState.ANALYTICS && <AnalyticsScreen onBack={handleRestart} playerData={currentUserData} userId={currentUser.uid} />}
             {appState === AppState.LEADERBOARD && <LeaderboardScreen onBack={handleRestart} currentUser={currentUser.uid} />}
             {appState === AppState.PLAYING && <GameScreen questions={questions} onEndGame={handleEndGame} onExit={handleRestart} isSaving={isSaving} />}
             {appState === AppState.RESULTS && gameResult && currentConfig && (

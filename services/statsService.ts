@@ -26,7 +26,8 @@ import {
   User,
   setPersistence,
   browserLocalPersistence,
-  updateProfile
+  updateProfile,
+  signInAnonymously
 } from 'firebase/auth';
 import { getAnalytics, isSupported } from 'firebase/analytics';
 import { UserStats, GameResult, LeaderboardEntry, Badge, UserRole, TeacherProfile } from '../types';
@@ -56,6 +57,19 @@ isSupported().then(supported => {
 const USERS_COLLECTION = 'Users'; 
 const TEACHERS_COLLECTION = 'Teachers'; 
 
+/**
+ * وظيفة لتسجيل الدخول المجهول للسماح بجلب البيانات العامة مثل قائمة المعلمين
+ */
+export const loginAnonymously = async () => {
+    try {
+        if (!auth.currentUser) {
+            await signInAnonymously(auth);
+        }
+    } catch (error) {
+        console.error("Anonymous login failed:", error);
+    }
+};
+
 const getLocalDateString = (date: Date = new Date()): string => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -70,11 +84,8 @@ export const getBadgeDefinitions = (totalCorrect: number): Badge[] => [
   { id: 4, name: 'الأسطورة', required: 300, icon: '🏆', unlocked: totalCorrect >= 300, color: 'text-yellow-600 bg-yellow-100 border-yellow-200' },
 ];
 
-/**
- * جلب بيانات المستخدم مع دعم البحث في مسار /Teachers/ بواسطة UID
- */
 export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile | null> => {
-  if (!uid) return null;
+  if (!uid || auth.currentUser?.isAnonymous) return null;
   
   try {
     const studentSnap = await getDoc(doc(db, USERS_COLLECTION, uid));
@@ -89,7 +100,6 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
       return { ...data, uid: studentSnap.id, teacherId: teacherIdStr, badges: getBadgeDefinitions(data.totalCorrect || 0) } as UserStats;
     }
     
-    // محاولة البحث عن المعلم - نستخدم استعلام محدد
     const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
     const tSnap = await getDocs(q);
     if (!tSnap.empty) {
@@ -97,14 +107,11 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
       return { ...docSnap.data(), teacherId: docSnap.id, role: UserRole.TEACHER } as TeacherProfile;
     }
   } catch (error) {
-    console.warn("LoadStats: Permission or Fetch Error", error);
+    console.warn("LoadStats Error:", error);
   }
   return null;
 };
 
-/**
- * البحث عن المعلم بالبريد (لأغراض تسجيل الدخول)
- */
 export const isTeacherByEmail = async (email: string): Promise<TeacherProfile | null> => {
     if (!email) return null;
     try {
@@ -116,27 +123,24 @@ export const isTeacherByEmail = async (email: string): Promise<TeacherProfile | 
       }
       return null;
     } catch (err) {
-      console.warn("isTeacherByEmail Error: This might be expected for students.", err);
       return null;
     }
 };
 
-/**
- * جلب جميع المعلمين النشطين (يتطلب Auth في القواعد)
- */
 export const fetchAllTeachers = async (): Promise<TeacherProfile[]> => {
   try {
+    // نطلب المعلمين النشطين فقط
     const q = query(collection(db, TEACHERS_COLLECTION), where("active", "==", true));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({ ...doc.data(), teacherId: doc.id })) as any;
   } catch (error) {
-    console.error("Error fetching teachers list:", error);
+    console.error("Critical: Permission Denied for Teachers List. Check Firebase Rules.", error);
     return [];
   }
 };
 
 export const fetchTeacherInfo = async (teacherId: string): Promise<TeacherProfile | null> => {
-  if (!teacherId) return null;
+  if (!teacherId || teacherId === 'none') return null;
   try {
     const docSnap = await getDoc(doc(db, TEACHERS_COLLECTION, teacherId.trim()));
     if (docSnap.exists()) {
@@ -148,13 +152,12 @@ export const fetchTeacherInfo = async (teacherId: string): Promise<TeacherProfil
   return null;
 };
 
-/**
- * دالة اشتراك محسنة مع معالجة أخطاء الصلاحيات
- */
 export const subscribeToUserStats = (uid: string, callback: (stats: any) => void): Unsubscribe => {
-  let innerUnsubscribe: Unsubscribe | null = null;
+  if (auth.currentUser?.isAnonymous) {
+      return () => {};
+  }
 
-  // نحاول أولاً الاشتراك كطالب
+  let innerUnsubscribe: Unsubscribe | null = null;
   const outerUnsubscribe = onSnapshot(doc(db, USERS_COLLECTION, uid), (docSnap) => {
     if (docSnap.exists()) {
       const data = docSnap.data();
@@ -166,7 +169,6 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
       }
       callback({ ...data, uid: docSnap.id, teacherId: teacherIdStr, badges: getBadgeDefinitions(data.totalCorrect || 0) });
     } else {
-        // إذا لم يكن طالباً، نحاول البحث كمعلم (فقط إذا لم يكن هناك اشتراك داخلي بالفعل)
         if (!innerUnsubscribe) {
             const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
             innerUnsubscribe = onSnapshot(q, (tSnap) => {
@@ -174,17 +176,10 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
                     const tDocSnap = tSnap.docs[0];
                     callback({ ...tDocSnap.data(), teacherId: tDocSnap.id, role: UserRole.TEACHER });
                 }
-            }, (error: FirestoreError) => {
-                // غالباً الطالب لا يملك صلاحية Query على مجموعة المعلمين
-                if (error.code !== 'permission-denied') {
-                    console.error("Teacher Sub Error:", error);
-                }
-            });
+            }, (error) => {});
         }
     }
-  }, (error: FirestoreError) => {
-      console.error("Student Sub Error:", error);
-  });
+  }, (error) => {});
   
   return () => {
       outerUnsubscribe();
@@ -195,32 +190,28 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
 export const createOrUpdatePlayerProfile = async (uid: string, email: string, displayName: string, teacherId?: string) => {
     const studentRef = doc(db, USERS_COLLECTION, uid);
     try {
-      const snap = await getDoc(studentRef);
-      const teacherRef = teacherId ? doc(db, TEACHERS_COLLECTION, teacherId.trim()) : null;
-      
-      if (!snap.exists()) {
-          await setDoc(studentRef, {
-              uid, 
-              email: email.trim().toLowerCase(), 
-              displayName: displayName || 'لاعب جديد', 
-              role: UserRole.STUDENT, 
-              teacherId: teacherRef,
-              totalCorrect: 0, 
-              totalIncorrect: 0, 
-              streak: 0, 
-              lastActive: new Date().toISOString(), 
-              dailyHistory: {},
-              badgesCount: 0
-          });
-      } else if (teacherId) {
-          await updateDoc(studentRef, { teacherId: teacherRef });
-      }
+      const teacherRef = (teacherId && teacherId !== 'none') ? doc(db, TEACHERS_COLLECTION, teacherId.trim()) : null;
+      await setDoc(studentRef, {
+          uid, 
+          email: email.trim().toLowerCase(), 
+          displayName: displayName || 'لاعب جديد', 
+          role: UserRole.STUDENT, 
+          teacherId: teacherRef,
+          totalCorrect: 0, 
+          totalIncorrect: 0, 
+          streak: 0, 
+          lastActive: new Date().toISOString(), 
+          dailyHistory: {},
+          badgesCount: 0
+      }, { merge: true });
     } catch (e) {
       console.error("Error in createOrUpdatePlayerProfile:", e);
+      throw e;
     }
 };
 
 export const updateUserStats = async (result: GameResult, uid: string) => {
+    if (auth.currentUser?.isAnonymous) return;
     const today = getLocalDateString();
     const userRef = doc(db, USERS_COLLECTION, uid);
     try {
@@ -247,7 +238,7 @@ export const updateUserStats = async (result: GameResult, uid: string) => {
 };
 
 export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => void, teacherId: string) => {
-  if (!teacherId || teacherId === 'none') {
+  if (!teacherId || teacherId === 'none' || auth.currentUser?.isAnonymous) {
     callback([]);
     return () => {};
   }
@@ -273,16 +264,13 @@ export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => v
     });
     callback(students);
   }, (error) => {
-      if (error.code !== 'permission-denied') {
-          console.error("Leaderboard Snapshot Error:", error);
-      }
       callback([]);
   });
 };
 
 export const updateUserProfileName = async (uid: string, newName: string, role: UserRole, teacherId?: string): Promise<void> => {
     const user = auth.currentUser;
-    if (!user) throw new Error("يجب تسجيل الدخول أولاً");
+    if (!user || user.isAnonymous) throw new Error("يجب تسجيل الدخول أولاً");
     await updateProfile(user, { displayName: newName });
     if (role === UserRole.STUDENT) {
         await updateDoc(doc(db, USERS_COLLECTION, uid), { displayName: newName });
