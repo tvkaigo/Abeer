@@ -3,8 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Difficulty, Operation, GameConfig, TeacherProfile, UserRole, AppState } from '../types';
 import { Brain, Calculator, ChevronLeft, Zap, Divide, X as MultiplyIcon, Plus, Minus, Trophy, BarChart3, Timer, Star, LogOut, UserCheck, User } from 'lucide-react';
 import { initAudio } from '../services/soundService';
-import { getBadgeDefinitions, auth, fetchTeacherInfo } from '../services/statsService';
-import { signOut } from 'firebase/auth';
+import { getBadgeDefinitions, auth, fetchTeacherInfo, signOut } from '../services/statsService';
 
 interface WelcomeScreenProps {
   onStart: (config: GameConfig) => void;

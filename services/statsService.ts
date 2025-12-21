@@ -1,5 +1,8 @@
 
 import { initializeApp, getApp, getApps } from 'firebase/app';
+// Exporting modular Firebase app functions
+export { initializeApp, getApp, getApps } from 'firebase/app';
+
 import { 
   getFirestore, 
   doc, 
@@ -20,6 +23,26 @@ import {
   FirestoreError,
   arrayUnion
 } from 'firebase/firestore';
+// Exporting modular Firestore functions and types
+export { 
+  getFirestore, 
+  doc, 
+  getDoc, 
+  setDoc, 
+  updateDoc,
+  collection, 
+  query, 
+  orderBy, 
+  increment,
+  onSnapshot,
+  where,
+  getDocs,
+  limit,
+  serverTimestamp,
+  arrayUnion
+};
+export type { DocumentReference, Unsubscribe, FirestoreError };
+
 import { 
   getAuth, 
   signInWithEmailAndPassword,
@@ -28,9 +51,28 @@ import {
   setPersistence,
   browserLocalPersistence,
   updateProfile,
-  signInAnonymously
+  signInAnonymously,
+  onAuthStateChanged,
+  createUserWithEmailAndPassword
 } from 'firebase/auth';
+// Exporting modular Auth functions and types
+export { 
+  getAuth, 
+  signInWithEmailAndPassword,
+  signOut, 
+  setPersistence,
+  browserLocalPersistence,
+  updateProfile,
+  signInAnonymously,
+  onAuthStateChanged,
+  createUserWithEmailAndPassword
+};
+export type { User };
+
 import { getAnalytics, isSupported } from 'firebase/analytics';
+// Exporting modular Analytics functions
+export { getAnalytics, isSupported } from 'firebase/analytics';
+
 import { UserStats, GameResult, LeaderboardEntry, Badge, UserRole, TeacherProfile } from '../types';
 
 const firebaseConfig = {
@@ -56,15 +98,16 @@ isSupported().then(supported => {
 });
 
 const USERS_COLLECTION = 'Users'; 
-const TEACHERS_COLLECTION = 'Teachers'; // المسار المطلوب من قبل المستخدم
+const TEACHERS_COLLECTION = 'Teachers'; 
 
 export const loginAnonymously = async () => {
     try {
         if (!auth.currentUser) {
+            // نحاول تسجيل الدخول، وإذا كان معطلاً في الكونسول لا نعطل التطبيق
             await signInAnonymously(auth);
         }
     } catch (error) {
-        console.error("Anonymous login failed:", error);
+        console.debug("Anonymous login skipped or disabled in console.");
     }
 };
 
@@ -98,7 +141,7 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
       return { ...data, uid: studentSnap.id, teacherId: teacherIdStr, badges: getBadgeDefinitions(data.totalCorrect || 0) } as UserStats;
     }
   } catch (error) {
-    console.debug("Note: User not in Student collection.");
+    console.debug("Not a student.");
   }
 
   try {
@@ -134,6 +177,7 @@ export const isTeacherByEmail = async (email: string): Promise<TeacherProfile | 
       return null;
     } catch (err) {
       console.error("Error checking teacher in DB:", err);
+      // إذا حدث خطأ أذونات، لا يمكننا التحقق قبل الدخول
       return null;
     }
 };
@@ -148,16 +192,22 @@ export const activateTeacherAccount = async (teacherId: string, uid: string) => 
         });
     } catch (error) {
         console.error("Error activating teacher account:", error);
+        // محاولة setDoc إذا فشل الـ update بسبب نقص البيانات الأساسية
+        try {
+            await setDoc(teacherRef, { uid, active: true, lastActive: new Date().toISOString() }, { merge: true });
+        } catch (e) {
+            console.error("Critical: Could not update teacher document.", e);
+        }
     }
 };
 
 export const fetchAllTeachers = async (): Promise<TeacherProfile[]> => {
   try {
-    const q = query(collection(db, TEACHERS_COLLECTION)); // جلب كل المعلمين المسجلين من قبل الإدارة
+    const q = query(collection(db, TEACHERS_COLLECTION));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({ ...doc.data(), teacherId: doc.id })) as any;
   } catch (error) {
-    console.error("Critical: Permission Denied for Teachers List.", error);
+    console.error("Permission Denied for Teachers List.", error);
     return [];
   }
 };

@@ -1,12 +1,18 @@
 
 import React, { useState, useEffect } from 'react';
 import { User, Mail, Lock, LogIn, UserPlus, Loader2, AlertCircle, UserCheck, ChevronDown, GraduationCap, Info, Sparkles, Send, CheckCircle2 } from 'lucide-react';
-import { auth, createOrUpdatePlayerProfile, fetchAllTeachers, isTeacherByEmail, activateTeacherAccount, loginAnonymously } from '../services/statsService';
 import { 
-    signInWithEmailAndPassword, 
-    createUserWithEmailAndPassword, 
+    auth, 
+    createOrUpdatePlayerProfile, 
+    fetchAllTeachers, 
+    isTeacherByEmail, 
+    activateTeacherAccount, 
+    loginAnonymously, 
+    signOut,
+    signInWithEmailAndPassword,
+    createUserWithEmailAndPassword,
     updateProfile
-} from 'firebase/auth';
+} from '../services/statsService';
 import { TeacherProfile } from '../types';
 
 interface UserEntryModalProps {
@@ -28,14 +34,14 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
   const loadTeachersList = async () => {
     setIsFetchingTeachers(true);
     try {
-        await loginAnonymously();
+        // لا نحتاج لـ loginAnonymously هنا إذا كانت القواعد تسمح بالقراءة أو إذا كان مسجلاً بالفعل
         const list = await fetchAllTeachers();
         const validTeachers = list.filter(t => t.displayName);
         const sorted = validTeachers.sort((a, b) => a.displayName.localeCompare(b.displayName, 'ar'));
         setTeachers(sorted);
     } catch (err) {
         console.error("Failed to load teachers:", err);
-        setError("عذراً، لم نتمكن من جلب قائمة المعلمين.");
+        // لا نظهر خطأ للمستخدم هنا لضمان استمرارية تجربة الدخول
     } finally {
         setIsFetchingTeachers(false);
     }
@@ -67,26 +73,33 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
 
     try {
       if (mode === 'teacher') {
-        // التحقق أولاً من وجود المعلم في قاعدة البيانات في المسار Teachers
-        if (!auth.currentUser) await loginAnonymously();
-        
+        // محاولة تسجيل الدخول أولاً
+        let userCredential;
+        try {
+            userCredential = await signInWithEmailAndPassword(auth, cleanEmail, password);
+        } catch (authErr: any) {
+            // إذا فشل تسجيل الدخول، نتحقق من رسالة الخطأ
+            if (authErr.code === 'auth/user-not-found' || authErr.code === 'auth/invalid-credential') {
+                throw { code: 'custom/email-incorrect' };
+            }
+            throw authErr;
+        }
+
+        const user = userCredential.user;
+
+        // بعد تسجيل الدخول بنجاح، نتحقق من صلاحية المعلم في Firestore
         const teacherProfile = await isTeacherByEmail(cleanEmail);
         
         if (!teacherProfile) {
             // المعلم غير موجود في المسار المعتمد من الإدارة
-            setError("البريد الإلكتروني غير صحيح أو غير مسجل في قائمة المعلمين المعتمدين.");
-            setIsLoading(false);
-            return;
+            await auth.signOut(); // طرده لأنه غير مصرح له كمعلم
+            throw { code: 'custom/email-incorrect' };
         }
-
-        // محاولة تسجيل الدخول بالبريد وكلمة المرور
-        const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, password);
-        const user = userCredential.user;
 
         // تحديث الـ UID إذا لم يكن مرتبطاً
         if (!teacherProfile.uid || teacherProfile.uid !== user.uid) {
             await activateTeacherAccount(teacherProfile.teacherId, user.uid);
-            setSuccess("تم تفعيل حسابك وربطه بنجاح. أهلاً بك يا معلمنا!");
+            setSuccess("أهلاً بك يا معلمنا! تم ربط حسابك بنجاح.");
             setTimeout(() => onSuccess(), 1500);
         } else {
             onSuccess();
@@ -113,11 +126,14 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
   };
 
   const handleAuthError = (err: any) => {
-    console.error("Auth Error Object:", err);
     let msg = "حدث خطأ في النظام، يرجى المحاولة لاحقاً.";
     
-    if (err.code) {
-        switch (err.code) {
+    const code = err.code || '';
+    
+    if (code === 'custom/email-incorrect') {
+        msg = "البريد الإلكتروني غير صحيح أو غير مسجل في قائمة المعلمين المعتمدين.";
+    } else {
+        switch (code) {
           case 'auth/user-not-found':
           case 'auth/invalid-credential':
             msg = "البريد الإلكتروني أو كلمة المرور غير صحيحة.";
@@ -131,12 +147,10 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
           case 'auth/invalid-email':
             msg = "صيغة البريد الإلكتروني غير صحيحة.";
             break;
-          case 'auth/network-request-failed':
-            msg = "خطأ في الاتصال بالإنترنت.";
+          case 'auth/admin-restricted-operation':
+            msg = "عملية مقيدة. يرجى مراجعة إعدادات Firebase (Anonymous Auth).";
             break;
         }
-    } else if (err.message && err.message.includes('400')) {
-        msg = "بيانات الدخول غير صحيحة أو الحساب غير موجود.";
     }
     
     setError(msg);
@@ -155,7 +169,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
              {mode === 'teacher' ? 'بوابة المعلم' : 'العبقري الصغير'}
           </h2>
           <p className="text-slate-500 mt-2 font-medium">
-            {mode === 'login' ? 'مرحباً بعودتك يا بطل!' : mode === 'signup' ? 'سجل الآن لتنضم لعالم الأبطال' : 'الدخول مخصص للمعلمين المعتمدين فقط'}
+            {mode === 'login' ? 'مرحباً بعودتك يا بطل!' : mode === 'signup' ? 'سجل الآن لتنضم لعالم الأبطال' : 'الدخول مخصص للمعلمين المعتمدين من الإدارة'}
           </p>
         </div>
 
@@ -213,7 +227,11 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
                 <div className="relative">
                     <select required value={teacherId} onChange={(e) => setTeacherId(e.target.value)} className="w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 focus:border-indigo-500 outline-none pr-12 bg-slate-50 font-bold appearance-none">
                         <option value="">{isFetchingTeachers ? 'جاري تحميل المعلمين...' : '-- اختر المعلم --'}</option>
-                        {teachers.map(t => <option key={t.teacherId} value={t.teacherId}>{t.displayName}</option>)}
+                        {teachers.length > 0 ? (
+                            teachers.map(t => <option key={t.teacherId} value={t.teacherId}>{t.displayName}</option>)
+                        ) : (
+                            <option value="" disabled>لا يوجد معلمون مسجلون حالياً</option>
+                        )}
                     </select>
                     <UserCheck className="absolute right-4 top-3.5 text-slate-400 pointer-events-none" size={20} />
                     <ChevronDown className="absolute left-4 top-3.5 text-slate-400 pointer-events-none" size={20} />
@@ -226,7 +244,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
               <Info className="shrink-0 mt-0.5" size={16} /> 
               <div className="leading-relaxed">
                 <p className="mb-1 text-purple-900">تنبيه للمعلم:</p>
-                <p className="opacity-80">فقط المعلمين المعتمدين من الإدارة يمكنهم الدخول. سيتم ربط حسابك ببريدك الإلكتروني تلقائياً عند أول دخول.</p>
+                <p className="opacity-80">يتم التحقق من بريدك الإلكتروني في قائمة الإدارة المعتمدة. في حال عدم وجودك، سيتم رفض الدخول.</p>
               </div>
             </div>
           )}

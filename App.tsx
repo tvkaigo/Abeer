@@ -9,8 +9,7 @@ import ProfileScreen from './components/ProfileScreen';
 import UserEntryModal from './components/UserEntryModal';
 import { AppState, GameConfig, GameResult, Question, Difficulty, Operation, UserStats, UserRole, TeacherProfile } from './types';
 import { generateQuestions } from './services/mathService';
-import { updateUserStats, auth, subscribeToUserStats } from './services/statsService';
-import { onAuthStateChanged, type User } from 'firebase/auth';
+import { updateUserStats, auth, subscribeToUserStats, onAuthStateChanged, type User } from './services/statsService';
 
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.WELCOME);
