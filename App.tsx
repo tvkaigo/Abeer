@@ -44,8 +44,6 @@ const App: React.FC = () => {
               setIsAuthChecking(false);
             }
           });
-          const timeout = setTimeout(() => setIsAuthChecking(false), 2000);
-          return () => clearTimeout(timeout);
         } catch (error) {
           setIsAuthChecking(false);
         }

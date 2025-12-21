@@ -1,5 +1,4 @@
 
-
 export enum Difficulty {
   BEGINNER = 'مبتدئ',
   INTERMEDIATE = 'متوسط',
@@ -73,6 +72,7 @@ export interface UserStats {
   totalCorrect: number;
   totalIncorrect: number;
   streak: number;
+  bestSession: number;
   lastPlayedDate: string | null;
   lastActive: string | null;
   dailyHistory: Record<string, DailyStat>;
@@ -86,11 +86,12 @@ export interface TeacherProfile {
   email: string;
   displayName: string;
   role: UserRole.TEACHER;
-   active: boolean;
-    createdByAdmin: boolean;
+  active: boolean;
+  createdByAdmin: boolean;
   totalCorrect: number;
   totalIncorrect: number;
   streak: number;
+  bestSession: number;
   lastPlayedDate: string | null;
   lastActive: string | null;
   dailyHistory: Record<string, DailyStat>;

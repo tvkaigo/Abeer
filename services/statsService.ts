@@ -101,14 +101,7 @@ const USERS_COLLECTION = 'Users';
 const TEACHERS_COLLECTION = 'Teachers'; 
 
 export const loginAnonymously = async () => {
-    try {
-        if (!auth.currentUser) {
-            // نحاول تسجيل الدخول، وإذا كان معطلاً في الكونسول لا نعطل التطبيق
-            await signInAnonymously(auth);
-        }
-    } catch (error) {
-        console.debug("Anonymous login skipped or disabled in console.");
-    }
+    return Promise.resolve();
 };
 
 const getLocalDateString = (date: Date = new Date()): string => {
@@ -128,6 +121,7 @@ export const getBadgeDefinitions = (totalCorrect: number): Badge[] => [
 export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile | null> => {
   if (!uid) return null;
   
+  // Try Student Collection
   try {
     const studentSnap = await getDoc(doc(db, USERS_COLLECTION, uid));
     if (studentSnap.exists()) {
@@ -141,9 +135,10 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
       return { ...data, uid: studentSnap.id, teacherId: teacherIdStr, badges: getBadgeDefinitions(data.totalCorrect || 0) } as UserStats;
     }
   } catch (error) {
-    console.debug("Not a student.");
+    console.debug("Not found in students collection or restricted.");
   }
 
+  // Try Teacher Collection
   try {
     const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
     const tSnap = await getDocs(q);
@@ -154,6 +149,7 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
         ...data, 
         teacherId: docSnap.id, 
         role: UserRole.TEACHER,
+        bestSession: data.bestSession || 0,
         badges: getBadgeDefinitions(data.totalCorrect || 0) 
       } as TeacherProfile;
     }
@@ -167,7 +163,6 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
 export const isTeacherByEmail = async (email: string): Promise<TeacherProfile | null> => {
     if (!email) return null;
     try {
-      // البحث عن المعلم بالبريد الإلكتروني في المسار Teachers
       const q = query(collection(db, TEACHERS_COLLECTION), where("email", "==", email.trim().toLowerCase()), limit(1));
       const snap = await getDocs(q);
       if (!snap.empty) {
@@ -177,7 +172,6 @@ export const isTeacherByEmail = async (email: string): Promise<TeacherProfile | 
       return null;
     } catch (err) {
       console.error("Error checking teacher in DB:", err);
-      // إذا حدث خطأ أذونات، لا يمكننا التحقق قبل الدخول
       return null;
     }
 };
@@ -191,12 +185,11 @@ export const activateTeacherAccount = async (teacherId: string, uid: string) => 
             lastActive: new Date().toISOString()
         });
     } catch (error) {
-        console.error("Error activating teacher account:", error);
-        // محاولة setDoc إذا فشل الـ update بسبب نقص البيانات الأساسية
+        console.warn("Permission issue during teacher activation, attempting merge as fallback...");
         try {
             await setDoc(teacherRef, { uid, active: true, lastActive: new Date().toISOString() }, { merge: true });
         } catch (e) {
-            console.error("Critical: Could not update teacher document.", e);
+            console.error("Could not link teacher account automatically. Admin intervention might be needed.");
         }
     }
 };
@@ -207,7 +200,7 @@ export const fetchAllTeachers = async (): Promise<TeacherProfile[]> => {
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({ ...doc.data(), teacherId: doc.id })) as any;
   } catch (error) {
-    console.error("Permission Denied for Teachers List.", error);
+    console.debug("Restricted access to full teacher list.");
     return [];
   }
 };
@@ -223,6 +216,22 @@ export const fetchTeacherInfo = async (teacherId: string): Promise<TeacherProfil
     console.error("Error fetching teacher info:", error);
   }
   return null;
+};
+
+export const fetchStudentsByTeacherId = async (teacherId: string): Promise<UserStats[]> => {
+    if (!teacherId || teacherId === 'none') return [];
+    try {
+        const teacherRef = doc(db, TEACHERS_COLLECTION, teacherId.trim());
+        const q = query(collection(db, USERS_COLLECTION), where("teacherId", "==", teacherRef));
+        const snapshot = await getDocs(q);
+        return snapshot.docs.map(s => {
+            const data = s.data();
+            return { ...data, uid: s.id, badges: getBadgeDefinitions(data.totalCorrect || 0) } as UserStats;
+        }).sort((a, b) => (b.totalCorrect || 0) - (a.totalCorrect || 0));
+    } catch (error) {
+        console.error("Error fetching students by query:", error);
+        return [];
+    }
 };
 
 export const fetchTeacherStudents = async (studentRefs: DocumentReference[]): Promise<UserStats[]> => {
@@ -263,7 +272,7 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
                 if (!tSnap.empty) {
                     const tDocSnap = tSnap.docs[0];
                     const data = tDocSnap.data();
-                    callback({ ...data, teacherId: tDocSnap.id, role: UserRole.TEACHER, badges: getBadgeDefinitions(data.totalCorrect || 0) });
+                    callback({ ...data, teacherId: tDocSnap.id, role: UserRole.TEACHER, bestSession: data.bestSession || 0, badges: getBadgeDefinitions(data.totalCorrect || 0) });
                 }
             }, (error) => {});
         }
@@ -275,7 +284,7 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
                 if (!tSnap.empty) {
                     const tDocSnap = tSnap.docs[0];
                     const data = tDocSnap.data();
-                    callback({ ...data, teacherId: tDocSnap.id, role: UserRole.TEACHER, badges: getBadgeDefinitions(data.totalCorrect || 0) });
+                    callback({ ...data, teacherId: tDocSnap.id, role: UserRole.TEACHER, bestSession: data.bestSession || 0, badges: getBadgeDefinitions(data.totalCorrect || 0) });
                 }
             }, (error) => {});
         }
@@ -301,17 +310,12 @@ export const createOrUpdatePlayerProfile = async (uid: string, email: string, di
           totalCorrect: 0, 
           totalIncorrect: 0, 
           streak: 0, 
+          bestSession: 0,
           lastActive: new Date().toISOString(), 
           dailyHistory: {},
-          badgesCount: 0,
-          bestSession: 0
+          badgesCount: 0
       }, { merge: true });
 
-      if (teacherRef) {
-          await updateDoc(teacherRef, {
-              studentRefs: arrayUnion(studentRef)
-          });
-      }
     } catch (e) {
       console.error("Error in createOrUpdatePlayerProfile:", e);
       throw e;
@@ -331,10 +335,10 @@ export const updateUserStats = async (result: GameResult, uid: string, role: Use
           userRef = doc(db, USERS_COLLECTION, uid);
       }
 
-      let snap = await getDoc(userRef);
-      if (!snap.exists()) return;
+      let snapShot = await getDoc(userRef);
+      if (!snapShot.exists()) return;
       
-      const data = snap.data() as any;
+      const data = snapShot.data() as any;
       const dailyHistory = data.dailyHistory || {};
       const todayStats = dailyHistory[todayStr] || { date: todayStr, correct: 0, incorrect: 0 };
       

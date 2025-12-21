@@ -15,12 +15,22 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, playerData, u
   const [rank, setRank] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(!playerData);
 
+  // Sync state if prop changes (essential for background subscription in App)
+  useEffect(() => {
+    if (playerData) {
+      setPlayer(playerData);
+      setIsLoading(false);
+    }
+  }, [playerData]);
+
   const fetchData = async () => {
     if (userId) {
       setIsLoading(true);
       try {
         const userData = await loadStats(userId);
-        setPlayer(userData);
+        if (userData) {
+            setPlayer(userData);
+        }
       } catch (error) {
         console.error("Error fetching analytics:", error);
       } finally {
@@ -30,6 +40,7 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, playerData, u
   };
 
   useEffect(() => {
+    // Only fetch if we don't have data from props yet
     if (!player) {
       fetchData();
     }
@@ -38,12 +49,11 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, playerData, u
   useEffect(() => {
     if (!player) return;
     
-    // تحديد الفصل المناسب للرتبة
     const tid = player.role === UserRole.STUDENT 
       ? (player as UserStats).teacherId 
       : (player as TeacherProfile).teacherId;
     
-    if (tid) {
+    if (tid && tid !== 'none') {
         const unsub = subscribeToLeaderboard((leaders) => {
             const userRank = leaders.findIndex(u => u.uid === userId) + 1;
             setRank(userRank > 0 ? userRank : null);
@@ -64,7 +74,12 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, playerData, u
       <AlertCircle size={48} className="text-red-500" />
       <h2 className="text-xl font-bold text-slate-800">عذراً، لم نتمكن من العثور على بياناتك</h2>
       <p className="text-slate-500">يرجى محاولة تسجيل الدخول مرة أخرى أو التحقق من اتصالك.</p>
-      <button onClick={onBack} className="bg-indigo-600 text-white px-6 py-2 rounded-xl font-bold">العودة للرئيسية</button>
+      <div className="flex gap-3">
+        <button onClick={onBack} className="bg-slate-200 text-slate-700 px-6 py-3 rounded-xl font-bold">العودة للرئيسية</button>
+        <button onClick={fetchData} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2">
+            <RefreshCw size={20} /> إعادة المحاولة
+        </button>
+      </div>
     </div>
   );
 
@@ -116,7 +131,7 @@ const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({ onBack, playerData, u
             onClick={fetchData}
             className="bg-white p-3 rounded-2xl shadow-sm text-slate-500 hover:text-indigo-600 hover:shadow-md transition-all active:scale-95"
           >
-            <RefreshCw size={24} />
+            <RefreshCw size={24} className={isLoading ? 'animate-spin' : ''} />
           </button>
         </div>
 

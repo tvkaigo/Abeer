@@ -1,13 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, Mail, Lock, LogIn, UserPlus, Loader2, AlertCircle, UserCheck, ChevronDown, GraduationCap, Info, Sparkles, Send, CheckCircle2 } from 'lucide-react';
+import { User, Mail, Lock, LogIn, UserPlus, Loader2, AlertCircle, UserCheck, ChevronDown, GraduationCap, Info, Sparkles, Send, CheckCircle2, RefreshCw } from 'lucide-react';
 import { 
     auth, 
     createOrUpdatePlayerProfile, 
     fetchAllTeachers, 
     isTeacherByEmail, 
     activateTeacherAccount, 
-    loginAnonymously, 
     signOut,
     signInWithEmailAndPassword,
     createUserWithEmailAndPassword,
@@ -30,18 +29,22 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
   const [success, setSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isFetchingTeachers, setIsFetchingTeachers] = useState(false);
+  const [teacherFetchError, setTeacherFetchError] = useState(false);
 
   const loadTeachersList = async () => {
     setIsFetchingTeachers(true);
+    setTeacherFetchError(false);
     try {
-        // لا نحتاج لـ loginAnonymously هنا إذا كانت القواعد تسمح بالقراءة أو إذا كان مسجلاً بالفعل
         const list = await fetchAllTeachers();
         const validTeachers = list.filter(t => t.displayName);
         const sorted = validTeachers.sort((a, b) => a.displayName.localeCompare(b.displayName, 'ar'));
         setTeachers(sorted);
+        if (sorted.length === 0) {
+            console.debug("No teachers found in the database.");
+        }
     } catch (err) {
-        console.error("Failed to load teachers:", err);
-        // لا نظهر خطأ للمستخدم هنا لضمان استمرارية تجربة الدخول
+        console.error("Failed to load teachers list:", err);
+        setTeacherFetchError(true);
     } finally {
         setIsFetchingTeachers(false);
     }
@@ -73,37 +76,37 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
 
     try {
       if (mode === 'teacher') {
-        // محاولة تسجيل الدخول أولاً
+        // محاولة تسجيل الدخول
         let userCredential;
         try {
             userCredential = await signInWithEmailAndPassword(auth, cleanEmail, password);
         } catch (authErr: any) {
-            // إذا فشل تسجيل الدخول، نتحقق من رسالة الخطأ
-            if (authErr.code === 'auth/user-not-found' || authErr.code === 'auth/invalid-credential') {
-                throw { code: 'custom/email-incorrect' };
+            // معالجة الأخطاء الناتجة عن Auth
+            if (authErr.code === 'auth/user-not-found' || authErr.code === 'auth/invalid-credential' || authErr.code === 'auth/wrong-password') {
+                throw { code: 'custom/incorrect-credentials' };
             }
             throw authErr;
         }
 
         const user = userCredential.user;
 
-        // بعد تسجيل الدخول بنجاح، نتحقق من صلاحية المعلم في Firestore
+        // التحقق من أن الحساب موجود في قائمة المعلمين المعتمدة من الإدارة
         const teacherProfile = await isTeacherByEmail(cleanEmail);
         
         if (!teacherProfile) {
-            // المعلم غير موجود في المسار المعتمد من الإدارة
-            await auth.signOut(); // طرده لأنه غير مصرح له كمعلم
-            throw { code: 'custom/email-incorrect' };
+            // إذا لم يكن موجوداً في Firestore كمعلم، نقوم بتسجيل الخروج وعرض الخطأ المطلوب
+            await auth.signOut();
+            setError("البريد الإلكتروني غير صحيح.");
+            setIsLoading(false);
+            return;
         }
 
-        // تحديث الـ UID إذا لم يكن مرتبطاً
+        // تفعيل الحساب وربط الـ UID
         if (!teacherProfile.uid || teacherProfile.uid !== user.uid) {
             await activateTeacherAccount(teacherProfile.teacherId, user.uid);
-            setSuccess("أهلاً بك يا معلمنا! تم ربط حسابك بنجاح.");
-            setTimeout(() => onSuccess(), 1500);
-        } else {
-            onSuccess();
         }
+        
+        onSuccess();
       } else if (mode === 'signup') {
         if (!cleanName || !teacherId) {
             setError("يرجى كتابة اسمك واختيار المعلم.");
@@ -121,22 +124,21 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
     } catch (err: any) {
       handleAuthError(err);
     } finally {
-      if (!success) setIsLoading(false);
+      if (!error && !success) setIsLoading(false);
     }
   };
 
   const handleAuthError = (err: any) => {
     let msg = "حدث خطأ في النظام، يرجى المحاولة لاحقاً.";
-    
     const code = err.code || '';
     
-    if (code === 'custom/email-incorrect') {
-        msg = "البريد الإلكتروني غير صحيح أو غير مسجل في قائمة المعلمين المعتمدين.";
+    if (code === 'custom/incorrect-credentials') {
+        msg = mode === 'teacher' ? "البريد الإلكتروني أو كلمة المرور غير صحيحة." : "البريد الإلكتروني أو كلمة المرور غير صحيحة.";
     } else {
         switch (code) {
           case 'auth/user-not-found':
           case 'auth/invalid-credential':
-            msg = "البريد الإلكتروني أو كلمة المرور غير صحيحة.";
+            msg = "البيانات المدخلة غير صحيحة.";
             break;
           case 'auth/wrong-password':
             msg = "كلمة المرور غير صحيحة.";
@@ -148,7 +150,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
             msg = "صيغة البريد الإلكتروني غير صحيحة.";
             break;
           case 'auth/admin-restricted-operation':
-            msg = "عملية مقيدة. يرجى مراجعة إعدادات Firebase (Anonymous Auth).";
+            msg = "هذه العملية مقيدة حالياً. يرجى مراجعة الإدارة.";
             break;
         }
     }
@@ -223,19 +225,41 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
 
           {mode === 'signup' && (
             <div className="animate-fade-in-up">
-                <label className="block text-slate-700 font-bold mb-1.5 text-xs mr-2">اختر معلم فصلك</label>
+                <div className="flex items-center justify-between mb-1.5 mr-2">
+                    <label className="block text-slate-700 font-bold text-xs">اختر معلم فصلك</label>
+                    {isFetchingTeachers && <Loader2 size={14} className="animate-spin text-indigo-500" />}
+                </div>
                 <div className="relative">
-                    <select required value={teacherId} onChange={(e) => setTeacherId(e.target.value)} className="w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 focus:border-indigo-500 outline-none pr-12 bg-slate-50 font-bold appearance-none">
-                        <option value="">{isFetchingTeachers ? 'جاري تحميل المعلمين...' : '-- اختر المعلم --'}</option>
-                        {teachers.length > 0 ? (
-                            teachers.map(t => <option key={t.teacherId} value={t.teacherId}>{t.displayName}</option>)
-                        ) : (
+                    <select 
+                        required 
+                        value={teacherId} 
+                        onChange={(e) => setTeacherId(e.target.value)} 
+                        disabled={isFetchingTeachers}
+                        className={`w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 focus:border-indigo-500 outline-none pr-12 font-bold appearance-none transition-all ${isFetchingTeachers ? 'bg-slate-100 text-slate-400' : 'bg-slate-50'}`}
+                    >
+                        <option value="">{isFetchingTeachers ? 'جاري التحميل...' : teacherFetchError ? 'خطأ في التحميل' : '-- اختر المعلم --'}</option>
+                        {teachers.length > 0 && teachers.map(t => <option key={t.teacherId} value={t.teacherId}>{t.displayName}</option>)}
+                        {!isFetchingTeachers && !teacherFetchError && teachers.length === 0 && (
                             <option value="" disabled>لا يوجد معلمون مسجلون حالياً</option>
                         )}
                     </select>
                     <UserCheck className="absolute right-4 top-3.5 text-slate-400 pointer-events-none" size={20} />
-                    <ChevronDown className="absolute left-4 top-3.5 text-slate-400 pointer-events-none" size={20} />
+                    <ChevronDown className={`absolute left-4 top-3.5 text-slate-400 pointer-events-none transition-transform ${isFetchingTeachers ? 'opacity-0' : 'opacity-100'}`} size={20} />
                 </div>
+                {teacherFetchError && (
+                    <div className="mt-2 flex items-center justify-between px-2">
+                        <span className="text-[10px] text-red-500 font-bold flex items-center gap-1">
+                            <AlertCircle size={10} /> فشل تحميل قائمة المعلمين
+                        </span>
+                        <button 
+                            type="button" 
+                            onClick={loadTeachersList} 
+                            className="text-[10px] text-indigo-600 font-black flex items-center gap-1 hover:underline"
+                        >
+                            <RefreshCw size={10} /> إعادة المحاولة
+                        </button>
+                    </div>
+                )}
             </div>
           )}
 

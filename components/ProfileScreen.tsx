@@ -4,9 +4,9 @@ import { UserStats, TeacherProfile, UserRole } from '../types';
 import { 
   Home, User, Mail, UserCheck, Shield, Edit3, Save, 
   Loader2, AlertCircle, CheckCircle2, Award, X, HelpCircle,
-  Star, Trophy, Target, Users, ChevronLeft
+  Star, Trophy, Target, Users, ChevronLeft, RefreshCw
 } from 'lucide-react';
-import { updateUserProfileName, fetchTeacherInfo, getBadgeDefinitions, fetchTeacherStudents } from '../services/statsService';
+import { updateUserProfileName, fetchTeacherInfo, getBadgeDefinitions, fetchStudentsByTeacherId } from '../services/statsService';
 
 interface ProfileScreenProps {
   onBack: () => void;
@@ -25,18 +25,26 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, playerData, userI
   const [teacher, setTeacher] = useState<TeacherProfile | null>(null);
   const [myStudents, setMyStudents] = useState<UserStats[]>([]);
 
+  const loadMyStudents = async () => {
+    if (playerData?.role === UserRole.TEACHER) {
+        setIsFetchingStudents(true);
+        try {
+            const tid = (playerData as TeacherProfile).teacherId;
+            const students = await fetchStudentsByTeacherId(tid);
+            setMyStudents(students);
+        } catch (err) {
+            console.error("Failed to load students:", err);
+        } finally {
+            setIsFetchingStudents(false);
+        }
+    }
+  };
+
   useEffect(() => {
     if (playerData?.role === UserRole.STUDENT && (playerData as UserStats).teacherId) {
         fetchTeacherInfo((playerData as UserStats).teacherId!).then(setTeacher);
     } else if (playerData?.role === UserRole.TEACHER) {
-        const teacherData = playerData as TeacherProfile;
-        if (teacherData.studentRefs && teacherData.studentRefs.length > 0) {
-            setIsFetchingStudents(true);
-            fetchTeacherStudents(teacherData.studentRefs).then(students => {
-                setMyStudents(students);
-                setIsFetchingStudents(false);
-            });
-        }
+        loadMyStudents();
     }
   }, [playerData]);
 
@@ -197,21 +205,30 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, playerData, userI
             </div>
         </div>
 
-        {/* Teacher's Students Section (New) */}
+        {/* Teacher's Students Section */}
         {isTeacher && (
             <div className="animate-fade-in">
-                <div className="flex items-center gap-3 mb-4 mr-4">
-                    <div className="bg-purple-600 p-2 rounded-xl text-white shadow-lg">
-                        <Users size={20} />
+                <div className="flex items-center justify-between mb-4 mr-4">
+                    <div className="flex items-center gap-3">
+                        <div className="bg-purple-600 p-2 rounded-xl text-white shadow-lg">
+                            <Users size={20} />
+                        </div>
+                        <h2 className="text-xl font-black text-slate-800 tracking-tight">قائمة طلاب فصلي</h2>
+                        <span className="bg-purple-100 text-purple-600 px-3 py-1 rounded-full text-xs font-black">
+                            {myStudents.length} {myStudents.length === 1 ? 'بطل' : 'أبطال'}
+                        </span>
                     </div>
-                    <h2 className="text-xl font-black text-slate-800 tracking-tight">قائمة طلاب فصلي</h2>
-                    <span className="bg-purple-100 text-purple-600 px-3 py-1 rounded-full text-xs font-black">
-                        {myStudents.length} {myStudents.length === 1 ? 'بطل' : 'أبطال'}
-                    </span>
+                    <button 
+                        onClick={loadMyStudents}
+                        className="p-2 text-purple-600 hover:bg-purple-50 rounded-xl transition-all"
+                        title="تحديث القائمة"
+                    >
+                        <RefreshCw size={20} className={isFetchingStudents ? 'animate-spin' : ''} />
+                    </button>
                 </div>
 
                 <div className="space-y-3">
-                    {isFetchingStudents ? (
+                    {isFetchingStudents && myStudents.length === 0 ? (
                         <div className="flex flex-col items-center justify-center p-12 bg-white rounded-[2.5rem] border-2 border-dashed border-slate-200">
                             <Loader2 size={32} className="text-purple-600 animate-spin mb-3" />
                             <p className="text-slate-400 font-bold">جاري تحضير قائمة المبدعين...</p>
