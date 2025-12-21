@@ -73,7 +73,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
     // خاص بالمعلم: إرسال رابط الدخول فقط
     if (mode === 'teacher') {
         if (!isValidEmail(cleanEmail)) {
-            setError("يرجى إدخل بريد إلكتروني صحيح.");
+            setError("يرجى إدخال بريد إلكتروني صحيح.");
             return;
         }
         setIsLoading(true);
@@ -84,7 +84,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
             }
             // إرسال رابط إعادة تعيين كلمة المرور كرابط دخول آمن
             await sendPasswordResetEmail(auth, cleanEmail);
-            setSuccess("تم إرسال رابط الدخول الآمن إلى بريدك الإلكتروني بنجاح. يرجى مراجعة بريدك.");
+            setSuccess("تم إرسال رابط الدخول الآمن إلى بريدك الإلكتروني بنجاح. يرجى مراجعة بريدك للبدء.");
         } catch (err: any) {
             handleAuthError(err);
         } finally {
@@ -193,10 +193,10 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
                       type="text" 
                       required={mode === 'signup'} 
                       disabled={mode === 'teacher'}
-                      value={mode === 'teacher' ? 'خاص بالمعلمين المسجلين' : displayName} 
+                      value={mode === 'teacher' ? 'يتم التوثيق عبر البريد' : displayName} 
                       onChange={(e) => setDisplayName(e.target.value)} 
                       placeholder="اسمك بالعربية" 
-                      className={`w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 outline-none pr-12 font-bold ${mode === 'teacher' ? 'bg-slate-200 cursor-not-allowed' : 'focus:border-indigo-500 bg-slate-50'}`} 
+                      className={`w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 outline-none pr-12 font-bold ${mode === 'teacher' ? 'bg-slate-200 cursor-not-allowed italic' : 'focus:border-indigo-500 bg-slate-50'}`} 
                     />
                     <User className="absolute right-4 top-3.5 text-slate-400" size={20} />
                 </div>
@@ -248,7 +248,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
               <Info className="shrink-0 mt-0.5" size={16} /> 
               <div className="leading-relaxed">
                 <p className="mb-1 text-purple-900">نظام الدخول الآمن للمعلمين:</p>
-                <p className="opacity-80">أدخل بريدك الإلكتروني المسجل وسنقوم بإرسال رابط دخول آمن فورياً. لا حاجة لكلمة مرور في هذه الخطوة.</p>
+                <p className="opacity-80">أدخل بريدك الإلكتروني المسجل وسنقوم بإرسال رابط دخول آمن فورياً إلى بريدك. لا حاجة لاستخدام كلمة مرور تقليدية في هذه الخطوة لضمان أعلى مستويات الأمان.</p>
               </div>
             </div>
           )}
