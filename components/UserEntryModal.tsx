@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { User, Mail, Lock, LogIn, UserPlus, Loader2, AlertCircle, UserCheck, ChevronDown, GraduationCap, Info, Sparkles, Send, CheckCircle2 } from 'lucide-react';
-import { auth, createOrUpdatePlayerProfile, fetchAllTeachers, isTeacherByEmail, activateTeacherAccount, loadStats, loginAnonymously } from '../services/statsService';
+import { auth, createOrUpdatePlayerProfile, fetchAllTeachers, isTeacherByEmail, activateTeacherAccount, loginAnonymously } from '../services/statsService';
 import { 
     signInWithEmailAndPassword, 
     createUserWithEmailAndPassword, 
@@ -24,10 +24,6 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
   const [success, setSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isFetchingTeachers, setIsFetchingTeachers] = useState(false);
-
-  const isValidEmail = (email: string) => {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  };
 
   const loadTeachersList = async () => {
     setIsFetchingTeachers(true);
@@ -71,26 +67,29 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
 
     try {
       if (mode === 'teacher') {
-        // تنفيذ منطق المستخدم: المعلم يدخل البيانات المعطاة له من الإدارة
+        // التحقق أولاً من وجود المعلم في قاعدة البيانات في المسار Teachers
+        if (!auth.currentUser) await loginAnonymously();
+        
+        const teacherProfile = await isTeacherByEmail(cleanEmail);
+        
+        if (!teacherProfile) {
+            // المعلم غير موجود في المسار المعتمد من الإدارة
+            setError("البريد الإلكتروني غير صحيح أو غير مسجل في قائمة المعلمين المعتمدين.");
+            setIsLoading(false);
+            return;
+        }
+
+        // محاولة تسجيل الدخول بالبريد وكلمة المرور
         const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, password);
         const user = userCredential.user;
 
-        // البحث عن ملف المعلم في Firestore للتأكد من وجوده مسبقاً (Admin Created)
-        const teacherProfile = await isTeacherByEmail(cleanEmail);
-        
-        if (teacherProfile) {
-            // التحقق مما إذا كان الحساب غير مفعل أو غير مرتبط بـ UID بعد
-            if (!teacherProfile.active || !teacherProfile.uid) {
-                await activateTeacherAccount(teacherProfile.teacherId, user.uid);
-                setSuccess("أهلاً بك يا معلمنا! تم ربط وتفعيل حسابك بنجاح.");
-                setTimeout(() => onSuccess(), 1500);
-            } else {
-                // الحساب مفعل ومرتبط مسبقاً، مجرد دخول عادي
-                onSuccess();
-            }
+        // تحديث الـ UID إذا لم يكن مرتبطاً
+        if (!teacherProfile.uid || teacherProfile.uid !== user.uid) {
+            await activateTeacherAccount(teacherProfile.teacherId, user.uid);
+            setSuccess("تم تفعيل حسابك وربطه بنجاح. أهلاً بك يا معلمنا!");
+            setTimeout(() => onSuccess(), 1500);
         } else {
-            // حالة أمان: إذا كان الحساب في Auth وليس في Firestore
-            throw { code: 'custom/not-a-teacher' };
+            onSuccess();
         }
       } else if (mode === 'signup') {
         if (!cleanName || !teacherId) {
@@ -114,36 +113,32 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
   };
 
   const handleAuthError = (err: any) => {
-    console.error("Auth Action Error Detail:", err);
-    let msg = "حدث خطأ غير متوقع، يرجى المحاولة مرة أخرى.";
+    console.error("Auth Error Object:", err);
+    let msg = "حدث خطأ في النظام، يرجى المحاولة لاحقاً.";
     
-    // معالجة الخطأ 400 والرسائل الشائعة
-    switch (err.code) {
-      case 'auth/email-already-in-use':
-        msg = "هذا البريد الإلكتروني مسجل مسبقاً. إذا كنت معلماً، يرجى استخدام تبويب المعلم.";
-        break;
-      case 'auth/user-not-found':
-        msg = "لم نجد حساباً بهذا البريد. تأكد من البيانات المعطاة لك من الإدارة.";
-        break;
-      case 'auth/wrong-password':
-        msg = "كلمة المرور غير صحيحة. يرجى التأكد من كتابتها بدقة.";
-        break;
-      case 'auth/invalid-credential':
-        msg = "بيانات الدخول غير صحيحة. يرجى مراجعة الإدارة.";
-        break;
-      case 'auth/invalid-email':
-        msg = "صيغة البريد الإلكتروني غير صحيحة.";
-        break;
-      case 'custom/not-a-teacher':
-        msg = "عذراً، هذا الحساب غير مسجل كمعلم في قاعدة بيانات النظام.";
-        break;
-      default:
-        // إذا كان الخطأ متعلق بـ Bad Request (400) ولم يتم تصنيفه
-        if (err.message && err.message.includes('400')) {
-            msg = "خطأ في الاتصال بالخدمة. يرجى التأكد من صحة البيانات أو المحاولة لاحقاً.";
+    if (err.code) {
+        switch (err.code) {
+          case 'auth/user-not-found':
+          case 'auth/invalid-credential':
+            msg = "البريد الإلكتروني أو كلمة المرور غير صحيحة.";
+            break;
+          case 'auth/wrong-password':
+            msg = "كلمة المرور غير صحيحة.";
+            break;
+          case 'auth/email-already-in-use':
+            msg = "هذا البريد مسجل مسبقاً.";
+            break;
+          case 'auth/invalid-email':
+            msg = "صيغة البريد الإلكتروني غير صحيحة.";
+            break;
+          case 'auth/network-request-failed':
+            msg = "خطأ في الاتصال بالإنترنت.";
+            break;
         }
-        break;
+    } else if (err.message && err.message.includes('400')) {
+        msg = "بيانات الدخول غير صحيحة أو الحساب غير موجود.";
     }
+    
     setError(msg);
   };
 
@@ -160,7 +155,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
              {mode === 'teacher' ? 'بوابة المعلم' : 'العبقري الصغير'}
           </h2>
           <p className="text-slate-500 mt-2 font-medium">
-            {mode === 'login' ? 'مرحباً بعودتك يا بطل!' : mode === 'signup' ? 'سجل الآن لتنضم لعالم الأبطال' : 'الدخول بكلمة المرور الممنوحة لك'}
+            {mode === 'login' ? 'مرحباً بعودتك يا بطل!' : mode === 'signup' ? 'سجل الآن لتنضم لعالم الأبطال' : 'الدخول مخصص للمعلمين المعتمدين فقط'}
           </p>
         </div>
 
@@ -171,19 +166,17 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* حقل الاسم: معطل للمعلم لأن الإدارة حددته مسبقاً */}
-          {(mode === 'signup' || mode === 'teacher') && (
-            <div className={`animate-fade-in-up ${mode === 'teacher' ? 'opacity-50' : ''}`}>
+          {(mode === 'signup') && (
+            <div className="animate-fade-in-up">
                 <label className="block text-slate-700 font-bold mb-1.5 text-xs mr-2">الاسم المعروض</label>
                 <div className="relative">
                     <input 
                       type="text" 
-                      required={mode === 'signup'} 
-                      disabled={mode === 'teacher'}
-                      value={mode === 'teacher' ? 'الاسم محدد مسبقاً' : displayName} 
+                      required 
+                      value={displayName} 
                       onChange={(e) => setDisplayName(e.target.value)} 
                       placeholder="اسمك بالعربية" 
-                      className={`w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 outline-none pr-12 font-bold ${mode === 'teacher' ? 'bg-slate-200 cursor-not-allowed italic' : 'focus:border-indigo-500 bg-slate-50'}`} 
+                      className="w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 focus:border-indigo-500 outline-none pr-12 font-bold bg-slate-50" 
                     />
                     <User className="absolute right-4 top-3.5 text-slate-400" size={20} />
                 </div>
@@ -233,7 +226,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
               <Info className="shrink-0 mt-0.5" size={16} /> 
               <div className="leading-relaxed">
                 <p className="mb-1 text-purple-900">تنبيه للمعلم:</p>
-                <p className="opacity-80">استخدم البريد وكلمة المرور التي زودتك بها الإدارة. عند دخولك الأول، سيتم تنشيط حسابك تلقائياً لتظهر لطلابك في قائمة التسجيل.</p>
+                <p className="opacity-80">فقط المعلمين المعتمدين من الإدارة يمكنهم الدخول. سيتم ربط حسابك ببريدك الإلكتروني تلقائياً عند أول دخول.</p>
               </div>
             </div>
           )}

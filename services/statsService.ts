@@ -56,7 +56,7 @@ isSupported().then(supported => {
 });
 
 const USERS_COLLECTION = 'Users'; 
-const TEACHERS_COLLECTION = 'teachers'; 
+const TEACHERS_COLLECTION = 'Teachers'; // المسار المطلوب من قبل المستخدم
 
 export const loginAnonymously = async () => {
     try {
@@ -124,6 +124,7 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
 export const isTeacherByEmail = async (email: string): Promise<TeacherProfile | null> => {
     if (!email) return null;
     try {
+      // البحث عن المعلم بالبريد الإلكتروني في المسار Teachers
       const q = query(collection(db, TEACHERS_COLLECTION), where("email", "==", email.trim().toLowerCase()), limit(1));
       const snap = await getDocs(q);
       if (!snap.empty) {
@@ -132,6 +133,7 @@ export const isTeacherByEmail = async (email: string): Promise<TeacherProfile | 
       }
       return null;
     } catch (err) {
+      console.error("Error checking teacher in DB:", err);
       return null;
     }
 };
@@ -142,11 +144,7 @@ export const activateTeacherAccount = async (teacherId: string, uid: string) => 
         await updateDoc(teacherRef, {
             active: true,
             uid: uid,
-            totalCorrect: 0,
-            totalIncorrect: 0,
-            streak: 0,
-            lastActive: new Date().toISOString(),
-            dailyHistory: {}
+            lastActive: new Date().toISOString()
         });
     } catch (error) {
         console.error("Error activating teacher account:", error);
@@ -155,7 +153,7 @@ export const activateTeacherAccount = async (teacherId: string, uid: string) => 
 
 export const fetchAllTeachers = async (): Promise<TeacherProfile[]> => {
   try {
-    const q = query(collection(db, TEACHERS_COLLECTION), where("active", "==", true));
+    const q = query(collection(db, TEACHERS_COLLECTION)); // جلب كل المعلمين المسجلين من قبل الإدارة
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({ ...doc.data(), teacherId: doc.id })) as any;
   } catch (error) {
@@ -221,7 +219,6 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
         }
     }
   }, (error) => {
-      // Fallback for permissions
       if (!innerUnsubscribe) {
             const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
             innerUnsubscribe = onSnapshot(q, (tSnap) => {
@@ -297,7 +294,6 @@ export const updateUserStats = async (result: GameResult, uid: string, role: Use
       const totalCorrectNow = (data.totalCorrect || 0) + result.score;
       const badgesCount = getBadgeDefinitions(totalCorrectNow).filter(b => b.unlocked).length;
       
-      // منطق الـ Streak
       let newStreak = data.streak || 0;
       const lastPlayedDate = data.lastPlayedDate;
       

@@ -1,4 +1,5 @@
 
+
 export enum Difficulty {
   BEGINNER = 'مبتدئ',
   INTERMEDIATE = 'متوسط',
@@ -80,8 +81,8 @@ export interface UserStats {
 }
 
 export interface TeacherProfile {
-  uid?: string; // UID الخاص بـ Firebase Auth للربط
   teacherId: string; // Document ID
+  uid?: string; // Firebase Auth UID linked to this teacher profile
   email: string;
   displayName: string;
   role: UserRole.TEACHER;
