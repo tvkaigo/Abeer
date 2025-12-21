@@ -121,24 +121,20 @@ export const getBadgeDefinitions = (totalCorrect: number): Badge[] => [
 export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile | null> => {
   if (!uid) return null;
   
-  // Try Student Collection
   try {
     const studentSnap = await getDoc(doc(db, USERS_COLLECTION, uid));
     if (studentSnap.exists()) {
       const data = studentSnap.data();
       let teacherIdStr = '';
-      if (data.teacherId && typeof data.teacherId !== 'string') {
-        teacherIdStr = (data.teacherId as DocumentReference).id;
-      } else {
-        teacherIdStr = data.teacherId || '';
+      if (data.teacherId) {
+        teacherIdStr = typeof data.teacherId === 'string' ? data.teacherId : (data.teacherId as DocumentReference).id;
       }
       return { ...data, uid: studentSnap.id, teacherId: teacherIdStr, badges: getBadgeDefinitions(data.totalCorrect || 0) } as UserStats;
     }
   } catch (error) {
-    console.debug("Not found in students collection or restricted.");
+    console.debug("Not found in students collection.");
   }
 
-  // Try Teacher Collection
   try {
     const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
     const tSnap = await getDocs(q);
@@ -185,11 +181,12 @@ export const activateTeacherAccount = async (teacherId: string, uid: string) => 
             lastActive: new Date().toISOString()
         });
     } catch (error) {
-        console.warn("Permission issue during teacher activation, attempting merge as fallback...");
+        console.warn("Permission issue during teacher activation, attempting merge...");
         try {
             await setDoc(teacherRef, { uid, active: true, lastActive: new Date().toISOString() }, { merge: true });
         } catch (e) {
-            console.error("Could not link teacher account automatically. Admin intervention might be needed.");
+            console.error("Could not link teacher account. Please check Firestore Rules.");
+            throw e;
         }
     }
 };
@@ -221,8 +218,7 @@ export const fetchTeacherInfo = async (teacherId: string): Promise<TeacherProfil
 export const fetchStudentsByTeacherId = async (teacherId: string): Promise<UserStats[]> => {
     if (!teacherId || teacherId === 'none') return [];
     try {
-        const teacherRef = doc(db, TEACHERS_COLLECTION, teacherId.trim());
-        const q = query(collection(db, USERS_COLLECTION), where("teacherId", "==", teacherRef));
+        const q = query(collection(db, USERS_COLLECTION), where("teacherId", "==", teacherId.trim()));
         const snapshot = await getDocs(q);
         return snapshot.docs.map(s => {
             const data = s.data();
@@ -234,24 +230,6 @@ export const fetchStudentsByTeacherId = async (teacherId: string): Promise<UserS
     }
 };
 
-export const fetchTeacherStudents = async (studentRefs: DocumentReference[]): Promise<UserStats[]> => {
-    if (!studentRefs || studentRefs.length === 0) return [];
-    try {
-        const promises = studentRefs.map(ref => getDoc(ref));
-        const snaps = await Promise.all(promises);
-        return snaps
-            .filter(s => s.exists())
-            .map(s => {
-                const data = s.data();
-                return { ...data, uid: s.id } as UserStats;
-            })
-            .sort((a, b) => (b.totalCorrect || 0) - (a.totalCorrect || 0));
-    } catch (error) {
-        console.error("Error fetching teacher students:", error);
-        return [];
-    }
-};
-
 export const subscribeToUserStats = (uid: string, callback: (stats: any) => void): Unsubscribe => {
   let innerUnsubscribe: Unsubscribe | null = null;
   
@@ -259,13 +237,12 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
     if (docSnap.exists()) {
       const data = docSnap.data();
       let teacherIdStr = '';
-      if (data.teacherId && typeof data.teacherId !== 'string') {
-        teacherIdStr = (data.teacherId as DocumentReference).id;
-      } else {
-        teacherIdStr = data.teacherId || '';
+      if (data.teacherId) {
+        teacherIdStr = typeof data.teacherId === 'string' ? data.teacherId : (data.teacherId as DocumentReference).id;
       }
       callback({ ...data, uid: docSnap.id, teacherId: teacherIdStr, badges: getBadgeDefinitions(data.totalCorrect || 0) });
     } else {
+        // إذا لم يوجد مستند طالب، نبحث في المعلمين
         if (!innerUnsubscribe) {
             const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
             innerUnsubscribe = onSnapshot(q, (tSnap) => {
@@ -273,21 +250,17 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
                     const tDocSnap = tSnap.docs[0];
                     const data = tDocSnap.data();
                     callback({ ...data, teacherId: tDocSnap.id, role: UserRole.TEACHER, bestSession: data.bestSession || 0, badges: getBadgeDefinitions(data.totalCorrect || 0) });
+                } else {
+                    callback(null);
                 }
-            }, (error) => {});
+            }, (error) => {
+                callback(null);
+            });
         }
     }
   }, (error) => {
-      if (!innerUnsubscribe) {
-            const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
-            innerUnsubscribe = onSnapshot(q, (tSnap) => {
-                if (!tSnap.empty) {
-                    const tDocSnap = tSnap.docs[0];
-                    const data = tDocSnap.data();
-                    callback({ ...data, teacherId: tDocSnap.id, role: UserRole.TEACHER, bestSession: data.bestSession || 0, badges: getBadgeDefinitions(data.totalCorrect || 0) });
-                }
-            }, (error) => {});
-        }
+      console.warn("Snapshot error, user doc might not exist yet.");
+      callback(null);
   });
   
   return () => {
@@ -299,14 +272,14 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
 export const createOrUpdatePlayerProfile = async (uid: string, email: string, displayName: string, teacherId?: string) => {
     const studentRef = doc(db, USERS_COLLECTION, uid);
     try {
-      const teacherRef = (teacherId && teacherId !== 'none') ? doc(db, TEACHERS_COLLECTION, teacherId.trim()) : null;
+      const finalTeacherId = (teacherId && teacherId !== 'none') ? teacherId.trim() : '';
       
-      await setDoc(studentRef, {
+      const profileData = {
           uid, 
           email: email.trim().toLowerCase(), 
           displayName: displayName || 'لاعب جديد', 
           role: UserRole.STUDENT, 
-          teacherId: teacherRef,
+          teacherId: finalTeacherId,
           totalCorrect: 0, 
           totalIncorrect: 0, 
           streak: 0, 
@@ -314,10 +287,12 @@ export const createOrUpdatePlayerProfile = async (uid: string, email: string, di
           lastActive: new Date().toISOString(), 
           dailyHistory: {},
           badgesCount: 0
-      }, { merge: true });
+      };
 
+      await setDoc(studentRef, profileData, { merge: true });
+      return true;
     } catch (e) {
-      console.error("Error in createOrUpdatePlayerProfile:", e);
+      console.error("Critical Error in createOrUpdatePlayerProfile:", e);
       throw e;
     }
 };
@@ -348,23 +323,6 @@ export const updateUserStats = async (result: GameResult, uid: string, role: Use
       const totalCorrectNow = (data.totalCorrect || 0) + result.score;
       const badgesCount = getBadgeDefinitions(totalCorrectNow).filter(b => b.unlocked).length;
       
-      let newStreak = data.streak || 0;
-      const lastPlayedDate = data.lastPlayedDate;
-      
-      if (lastPlayedDate) {
-          const yesterday = new Date();
-          yesterday.setDate(yesterday.getDate() - 1);
-          const yesterdayStr = getLocalDateString(yesterday);
-          
-          if (lastPlayedDate === yesterdayStr) {
-              newStreak += 1;
-          } else if (lastPlayedDate !== todayStr) {
-              newStreak = 1;
-          }
-      } else {
-          newStreak = 1;
-      }
-
       const bestSession = Math.max(data.bestSession || 0, result.score);
       
       await updateDoc(userRef, {
@@ -373,7 +331,6 @@ export const updateUserStats = async (result: GameResult, uid: string, role: Use
           lastActive: new Date().toISOString(),
           lastPlayedDate: todayStr,
           badgesCount: badgesCount,
-          streak: newStreak,
           bestSession: bestSession,
           dailyHistory: { ...dailyHistory, [todayStr]: todayStats }
       });
@@ -387,16 +344,11 @@ export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => v
     callback([]);
     return () => {};
   }
-  const teacherRef = doc(db, TEACHERS_COLLECTION, teacherId.trim());
-  const q = query(collection(db, USERS_COLLECTION), where("teacherId", "==", teacherRef));
+  const q = query(collection(db, USERS_COLLECTION), where("teacherId", "==", teacherId.trim()));
   return onSnapshot(q, (snapshot) => {
     const students: LeaderboardEntry[] = [];
     snapshot.forEach(docSnap => {
       const data = docSnap.data();
-      let tid = '';
-      if (data.teacherId && typeof data.teacherId !== 'string') tid = (data.teacherId as DocumentReference).id;
-      else tid = data.teacherId || '';
-      
       students.push({ 
         uid: docSnap.id, 
         displayName: data.displayName || 'لاعب',
@@ -404,11 +356,12 @@ export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => v
         totalCorrect: data.totalCorrect || 0,
         badgesCount: data.badgesCount || 0,
         lastActive: data.lastActive || '',
-        teacherId: tid 
+        teacherId: data.teacherId 
       });
     });
     callback(students);
   }, (error) => {
+      console.error("Leaderboard subscription error:", error);
       callback([]);
   });
 };
@@ -416,11 +369,17 @@ export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => v
 export const updateUserProfileName = async (uid: string, newName: string, role: UserRole, teacherId?: string): Promise<void> => {
     const user = auth.currentUser;
     if (!user) throw new Error("يجب تسجيل الدخول أولاً");
-    await updateProfile(user, { displayName: newName });
-    if (role === UserRole.STUDENT) {
-        await updateDoc(doc(db, USERS_COLLECTION, uid), { displayName: newName });
-    } else if (role === UserRole.TEACHER && teacherId) {
-        await updateDoc(doc(db, TEACHERS_COLLECTION, teacherId), { displayName: newName });
+    
+    try {
+        await updateProfile(user, { displayName: newName });
+        if (role === UserRole.STUDENT) {
+            await setDoc(doc(db, USERS_COLLECTION, uid), { displayName: newName }, { merge: true });
+        } else if (role === UserRole.TEACHER && teacherId) {
+            await setDoc(doc(db, TEACHERS_COLLECTION, teacherId), { displayName: newName }, { merge: true });
+        }
+    } catch (error) {
+        console.error("Error updating profile name in Firestore:", error);
+        throw error;
     }
 };
 

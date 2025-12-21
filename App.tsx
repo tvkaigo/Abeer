@@ -36,17 +36,16 @@ const App: React.FC = () => {
 
       if (user && !user.isAnonymous) {
         setIsAuthChecking(true);
-        try {
-          userSubRef.current = subscribeToUserStats(user.uid, (data) => {
-            if (data) {
-              setCurrentUserData(data);
-              setHighScore(data.bestSession || 0);
-              setIsAuthChecking(false);
-            }
-          });
-        } catch (error) {
+        // الاشتراك في البيانات مع ضمان عدم التعليق
+        userSubRef.current = subscribeToUserStats(user.uid, (data) => {
+          if (data) {
+            setCurrentUserData(data);
+            setHighScore(data.bestSession || 0);
+          } else {
+            setCurrentUserData(null);
+          }
           setIsAuthChecking(false);
-        }
+        });
       } else {
         setCurrentUserData(null);
         setIsAuthChecking(false);
@@ -76,7 +75,6 @@ const App: React.FC = () => {
     setIsSaving(true);
     setGameResult(result);
     
-    // التحقق من الرقم القياسي الجديد
     if (result.score > highScore) {
         setIsNewHighScore(true);
         setHighScore(result.score);
@@ -107,12 +105,12 @@ const App: React.FC = () => {
     </div>
   );
 
-  const isRealUser = currentUser && !currentUser.isAnonymous;
+  const isRealUserAndHasProfile = currentUser && !currentUser.isAnonymous && currentUserData;
 
   return (
     <div className="min-h-screen text-slate-800 font-sans">
-      {!isRealUser && <UserEntryModal onSuccess={() => {}} />}
-      {isRealUser && (
+      {!isRealUserAndHasProfile && <UserEntryModal onSuccess={() => {}} />}
+      {isRealUserAndHasProfile && (
         <>
             {appState === AppState.WELCOME && (
                 <WelcomeScreen 
