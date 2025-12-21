@@ -15,7 +15,8 @@ import {
   getDocs,
   limit,
   serverTimestamp,
-  DocumentReference
+  DocumentReference,
+  Unsubscribe
 } from 'firebase/firestore';
 import { 
   getAuth, 
@@ -69,15 +70,13 @@ export const getBadgeDefinitions = (totalCorrect: number): Badge[] => [
 ];
 
 /**
- * جلب بيانات المستخدم مع دعم البحث عن المعلم في مسار /Teachers/ بواسطة UID
+ * جلب بيانات المستخدم مع دعم البحث في مسار /Teachers/ بواسطة UID
  */
 export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile | null> => {
   if (!uid) return null;
   
   try {
-    // 1. البحث في مجموعة الطلاب
-    const studentRef = doc(db, USERS_COLLECTION, uid);
-    const studentSnap = await getDoc(studentRef);
+    const studentSnap = await getDoc(doc(db, USERS_COLLECTION, uid));
     if (studentSnap.exists()) {
       const data = studentSnap.data();
       let teacherIdStr = '';
@@ -86,105 +85,74 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
       } else {
         teacherIdStr = data.teacherId || '';
       }
-
-      return { 
-        ...data, 
-        uid: studentSnap.id, 
-        teacherId: teacherIdStr,
-        badges: getBadgeDefinitions(data.totalCorrect || 0) 
-      } as UserStats;
+      return { ...data, uid: studentSnap.id, teacherId: teacherIdStr, badges: getBadgeDefinitions(data.totalCorrect || 0) } as UserStats;
     }
     
-    // 2. البحث في مجموعة المعلمين /Teachers/ بواسطة حقل UID المربوط
     const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
     const tSnap = await getDocs(q);
     if (!tSnap.empty) {
       const docSnap = tSnap.docs[0];
-      const docData = docSnap.data();
-      return { 
-        ...docData, 
-        teacherId: docSnap.id,
-        role: UserRole.TEACHER 
-      } as TeacherProfile;
+      return { ...docSnap.data(), teacherId: docSnap.id, role: UserRole.TEACHER } as TeacherProfile;
     }
   } catch (error) {
-    console.error("Error loading stats from cloud:", error);
+    console.error("Error loading stats:", error);
   }
   return null;
 };
 
 /**
- * التحقق من وجود المعلم بواسطة البريد الإلكتروني في مجموعة /Teachers/
+ * البحث عن المعلم بالبريد (لأغراض تسجيل الدخول)
  */
 export const isTeacherByEmail = async (email: string): Promise<TeacherProfile | null> => {
     if (!email) return null;
     try {
       const q = query(collection(db, TEACHERS_COLLECTION), where("email", "==", email.trim().toLowerCase()), limit(1));
       const snap = await getDocs(q);
-      
       if (!snap.empty) {
           const teacherDoc = snap.docs[0];
-          const data = teacherDoc.data();
-          if (data.active !== false) {
-              return {
-                  teacherId: teacherDoc.id,
-                  ...data
-              } as TeacherProfile;
-          }
+          return { teacherId: teacherDoc.id, ...teacherDoc.data() } as TeacherProfile;
       }
       return null;
     } catch (err) {
-      console.error("Check teacher error:", err);
+      console.error("isTeacherByEmail Error:", err);
       return null;
     }
 };
 
 /**
- * جلب بيانات معلم معين من المسار /Teachers/{teacherId}
- */
-export const fetchTeacherInfo = async (teacherId: string): Promise<TeacherProfile | null> => {
-  if (!teacherId) return null;
-  try {
-    const docRef = doc(db, TEACHERS_COLLECTION, teacherId.trim());
-    const docSnap = await getDoc(docRef);
-    if (docSnap.exists()) {
-      const data = docSnap.data();
-      return { 
-          teacherId: docSnap.id,
-          displayName: data.displayName || 'معلم غير مسمى',
-          email: data.email || '',
-          role: UserRole.TEACHER,
-          ...data 
-      } as TeacherProfile;
-    }
-  } catch (error) {
-    console.error("Error fetching teacher from path /Teachers/ :", error);
-  }
-  return null;
-};
-
-/**
- * جلب جميع المعلمين النشطين من مجموعة /Teachers/
+ * جلب جميع المعلمين النشطين (يتطلب Auth في القواعد)
  */
 export const fetchAllTeachers = async (): Promise<TeacherProfile[]> => {
   try {
     const q = query(collection(db, TEACHERS_COLLECTION), where("active", "==", true));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ 
-      ...doc.data(), 
-      teacherId: doc.id 
-    })) as any;
+    return snapshot.docs.map(doc => ({ ...doc.data(), teacherId: doc.id })) as any;
   } catch (error) {
     console.error("Error fetching teachers list:", error);
     return [];
   }
 };
 
+export const fetchTeacherInfo = async (teacherId: string): Promise<TeacherProfile | null> => {
+  if (!teacherId) return null;
+  try {
+    const docSnap = await getDoc(doc(db, TEACHERS_COLLECTION, teacherId.trim()));
+    if (docSnap.exists()) {
+      return { teacherId: docSnap.id, ...docSnap.data() } as TeacherProfile;
+    }
+  } catch (error) {
+    console.error("Error fetching teacher info:", error);
+  }
+  return null;
+};
+
 /**
- * الاشتراك اللحظي في بيانات المستخدم (طالب أو معلم في مسار /Teachers/)
+ * دالة اشتراك محسنة تدعم الطالب والمعلم مع إلغاء اشتراك نظيف
  */
-export const subscribeToUserStats = (uid: string, callback: (stats: any) => void) => {
-  const unsubStudent = onSnapshot(doc(db, USERS_COLLECTION, uid), (docSnap) => {
+export const subscribeToUserStats = (uid: string, callback: (stats: any) => void): Unsubscribe => {
+  let innerUnsubscribe: Unsubscribe | null = null;
+
+  const outerUnsubscribe = onSnapshot(doc(db, USERS_COLLECTION, uid), (docSnap) => {
     if (docSnap.exists()) {
       const data = docSnap.data();
       let teacherIdStr = '';
@@ -193,26 +161,23 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
       } else {
         teacherIdStr = data.teacherId || '';
       }
-      callback({ 
-          ...data, 
-          uid: docSnap.id, 
-          teacherId: teacherIdStr,
-          badges: getBadgeDefinitions(data.totalCorrect || 0) 
-      });
+      callback({ ...data, uid: docSnap.id, teacherId: teacherIdStr, badges: getBadgeDefinitions(data.totalCorrect || 0) });
     } else {
-        // إذا لم يكن طالباً، نبحث عنه كمعلم في /Teachers/ بواسطة UID
+        // إذا لم يكن طالباً، نبحث عنه كمعلم
         const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
-        const unsubTeacher = onSnapshot(q, (tSnap) => {
+        innerUnsubscribe = onSnapshot(q, (tSnap) => {
             if (!tSnap.empty) {
                 const docSnap = tSnap.docs[0];
                 callback({ ...docSnap.data(), teacherId: docSnap.id, role: UserRole.TEACHER });
             }
         });
-        return unsubTeacher;
     }
   });
   
-  return unsubStudent;
+  return () => {
+      outerUnsubscribe();
+      if (innerUnsubscribe) innerUnsubscribe();
+  };
 };
 
 export const createOrUpdatePlayerProfile = async (uid: string, email: string, displayName: string, teacherId?: string) => {
@@ -276,16 +241,14 @@ export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => v
   }
   const teacherRef = doc(db, TEACHERS_COLLECTION, teacherId.trim());
   const q = query(collection(db, USERS_COLLECTION), where("teacherId", "==", teacherRef));
-  const unsubscribe = onSnapshot(q, (snapshot) => {
+  return onSnapshot(q, (snapshot) => {
     const students: LeaderboardEntry[] = [];
     snapshot.forEach(docSnap => {
       const data = docSnap.data();
       let tid = '';
-      if (data.teacherId && typeof data.teacherId !== 'string') {
-          tid = (data.teacherId as DocumentReference).id;
-      } else {
-          tid = data.teacherId || '';
-      }
+      if (data.teacherId && typeof data.teacherId !== 'string') tid = (data.teacherId as DocumentReference).id;
+      else tid = data.teacherId || '';
+      
       students.push({ 
         uid: docSnap.id, 
         displayName: data.displayName || 'لاعب',
@@ -297,11 +260,7 @@ export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => v
       });
     });
     callback(students);
-  }, (error) => {
-    console.error("Leaderboard subscription error:", error);
-    callback([]);
   });
-  return unsubscribe;
 };
 
 export const updateUserProfileName = async (uid: string, newName: string, role: UserRole, teacherId?: string): Promise<void> => {
