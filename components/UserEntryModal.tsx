@@ -37,7 +37,13 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
     try {
         await loginAnonymously();
         const list = await fetchAllTeachers();
-        const sorted = list.sort((a, b) => a.displayName.localeCompare(b.displayName, 'ar'));
+        
+        // فلترة العناصر بدون displayName لضمان عرض المعلمين الفعليين فقط
+        const validTeachers = list.filter(t => t.displayName);
+        
+        // الفرز بعد التأكد من وجود الاسم
+        const sorted = validTeachers.sort((a, b) => a.displayName.localeCompare(b.displayName, 'ar'));
+        
         setTeachers(sorted);
     } catch (err) {
         console.error("Failed to load teachers:", err);
@@ -67,7 +73,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
     // خاص بالمعلم: إرسال رابط الدخول فقط
     if (mode === 'teacher') {
         if (!isValidEmail(cleanEmail)) {
-            setError("يرجى إدخال بريد إلكتروني صحيح.");
+            setError("يرجى إدخل بريد إلكتروني صحيح.");
             return;
         }
         setIsLoading(true);
