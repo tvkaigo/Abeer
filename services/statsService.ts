@@ -55,7 +55,8 @@ isSupported().then(supported => {
 });
 
 const USERS_COLLECTION = 'Users'; 
-const TEACHERS_COLLECTION = 'Teachers'; 
+// تغيير المسمى ليتوافق مع طلب المستخدم
+const TEACHERS_COLLECTION = 'teachers'; 
 
 export const loginAnonymously = async () => {
     try {
@@ -97,6 +98,7 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
       return { ...data, uid: studentSnap.id, teacherId: teacherIdStr, badges: getBadgeDefinitions(data.totalCorrect || 0) } as UserStats;
     }
     
+    // البحث في مجموعة المعلمين باستخدام UID
     const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
     const tSnap = await getDocs(q);
     if (!tSnap.empty) {
@@ -109,6 +111,7 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
   return null;
 };
 
+// البحث عن المعلم عبر بريده الإلكتروني (يستخدم قبل وبعد تسجيل الدخول للربط)
 export const isTeacherByEmail = async (email: string): Promise<TeacherProfile | null> => {
     if (!email) return null;
     try {
@@ -125,7 +128,7 @@ export const isTeacherByEmail = async (email: string): Promise<TeacherProfile | 
 };
 
 /**
- * وظيفة لتنشيط حساب المعلم عند تسجيل الدخول الأول وربطه بـ UID الخاص به
+ * تنشيط حساب المعلم وربطه بـ UID الخاص به
  */
 export const activateTeacherAccount = async (teacherId: string, uid: string) => {
     const teacherRef = doc(db, TEACHERS_COLLECTION, teacherId);
@@ -142,6 +145,7 @@ export const activateTeacherAccount = async (teacherId: string, uid: string) => 
 
 export const fetchAllTeachers = async (): Promise<TeacherProfile[]> => {
   try {
+    // جلب المعلمين النشطين فقط ليتمكن الطلاب من اختيارهم
     const q = query(collection(db, TEACHERS_COLLECTION), where("active", "==", true));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({ ...doc.data(), teacherId: doc.id })) as any;

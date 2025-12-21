@@ -86,7 +86,6 @@ export interface TeacherProfile {
   role: UserRole.TEACHER;
    active: boolean;
     createdByAdmin: boolean;
-      uid: string;
   totalCorrect: number;
   totalIncorrect: number;
   streak: number;

@@ -71,26 +71,25 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
 
     try {
       if (mode === 'teacher') {
-        // تسجيل دخول المعلم بكلمة المرور المعطاة من الإدارة
+        // تنفيذ منطق المستخدم: المعلم يدخل البيانات المعطاة له من الإدارة
         const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, password);
         const user = userCredential.user;
 
-        // البحث عن ملف المعلم في Firestore للتأكد من أنه مسجل مسبقاً من قبل الإدارة
+        // البحث عن ملف المعلم في Firestore للتأكد من وجوده مسبقاً (Admin Created)
         const teacherProfile = await isTeacherByEmail(cleanEmail);
         
         if (teacherProfile) {
-            // إذا كان الدخول الأول (الحساب غير نشط)، نقوم بتفعيله وربطه بـ UID الخاص بالدخول
+            // تفعيل الحساب تلقائياً عند أول دخول كما هو مطلوب
             if (!teacherProfile.active) {
                 await activateTeacherAccount(teacherProfile.teacherId, user.uid);
-                setSuccess("تم تفعيل حسابك بنجاح! أهلاً بك في منصة العبقري الصغير.");
-                // تأخير بسيط لعرض رسالة النجاح
+                setSuccess("أهلاً بك يا معلمنا! تم تفعيل حسابك لأول مرة بنجاح.");
                 setTimeout(() => onSuccess(), 1500);
             } else {
-                // الحساب نشط بالفعل، فقط ننتقل للداخل
+                // الحساب مفعل مسبقاً، مجرد دخول عادي
                 onSuccess();
             }
         } else {
-            // إذا لم يتم العثور على ملف في Firestore رغم نجاح الدخول في Auth
+            // حالة أمان: إذا كان الحساب في Auth وليس في Firestore
             throw { code: 'custom/not-a-teacher' };
         }
       } else if (mode === 'signup') {
@@ -115,22 +114,34 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
   };
 
   const handleAuthError = (err: any) => {
-    console.error("Auth Action Error:", err);
+    console.error("Auth Action Error Detail:", err);
     let msg = "حدث خطأ غير متوقع، يرجى المحاولة مرة أخرى.";
+    
+    // معالجة الخطأ 400 والرسائل الشائعة
     switch (err.code) {
+      case 'auth/email-already-in-use':
+        msg = "هذا البريد الإلكتروني مسجل مسبقاً. إذا كنت معلماً، يرجى استخدام تبويب المعلم.";
+        break;
       case 'auth/user-not-found':
-        msg = "لم نجد حساباً بهذا البريد الإلكتروني.";
+        msg = "لم نجد حساباً بهذا البريد. تأكد من البيانات المعطاة لك من الإدارة.";
         break;
       case 'auth/wrong-password':
-        msg = "كلمة المرور التي أدخلتها غير صحيحة.";
+        msg = "كلمة المرور غير صحيحة. يرجى التأكد من كتابتها بدقة.";
         break;
       case 'auth/invalid-credential':
-        msg = "بيانات الدخول غير صحيحة. يرجى التأكد من البريد وكلمة المرور.";
+        msg = "بيانات الدخول غير صحيحة. يرجى مراجعة الإدارة.";
+        break;
+      case 'auth/invalid-email':
+        msg = "صيغة البريد الإلكتروني غير صحيحة.";
         break;
       case 'custom/not-a-teacher':
-        msg = "عذراً، هذا الحساب ليس مسجلاً كمعلم في نظامنا. يرجى مراجعة الإدارة.";
+        msg = "عذراً، هذا الحساب غير مسجل كمعلم في قاعدة بيانات النظام.";
         break;
       default:
+        // إذا كان الخطأ متعلق بـ Bad Request (400) ولم يتم تصنيفه
+        if (err.message && err.message.includes('400')) {
+            msg = "خطأ في الاتصال بالخدمة. يرجى التأكد من صحة البيانات أو المحاولة لاحقاً.";
+        }
         break;
     }
     setError(msg);
