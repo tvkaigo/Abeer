@@ -4,9 +4,9 @@ import { UserStats, TeacherProfile, UserRole } from '../types';
 import { 
   Home, User, Mail, UserCheck, Shield, Edit3, Save, 
   Loader2, AlertCircle, CheckCircle2, Award, X, HelpCircle,
-  Star, Trophy, Target
+  Star, Trophy, Target, Users, ChevronLeft
 } from 'lucide-react';
-import { updateUserProfileName, fetchTeacherInfo, getBadgeDefinitions } from '../services/statsService';
+import { updateUserProfileName, fetchTeacherInfo, getBadgeDefinitions, fetchTeacherStudents } from '../services/statsService';
 
 interface ProfileScreenProps {
   onBack: () => void;
@@ -18,14 +18,25 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, playerData, userI
   const [displayName, setDisplayName] = useState(playerData?.displayName || '');
   const [isEditing, setIsEditing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isFetchingStudents, setIsFetchingStudents] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [teacher, setTeacher] = useState<TeacherProfile | null>(null);
+  const [myStudents, setMyStudents] = useState<UserStats[]>([]);
 
   useEffect(() => {
     if (playerData?.role === UserRole.STUDENT && (playerData as UserStats).teacherId) {
         fetchTeacherInfo((playerData as UserStats).teacherId!).then(setTeacher);
+    } else if (playerData?.role === UserRole.TEACHER) {
+        const teacherData = playerData as TeacherProfile;
+        if (teacherData.studentRefs && teacherData.studentRefs.length > 0) {
+            setIsFetchingStudents(true);
+            fetchTeacherStudents(teacherData.studentRefs).then(students => {
+                setMyStudents(students);
+                setIsFetchingStudents(false);
+            });
+        }
     }
   }, [playerData]);
 
@@ -71,8 +82,8 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, playerData, userI
   const unlockedBadges = badges.filter(b => b.unlocked);
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center p-4 sm:p-8 font-sans relative">
-      <div className="w-full max-w-2xl animate-fade-in-up">
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center p-4 sm:p-8 font-sans relative overflow-y-auto">
+      <div className="w-full max-w-2xl animate-fade-in-up pb-20">
         
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
@@ -87,12 +98,11 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, playerData, userI
         </div>
 
         {/* Profile Card */}
-        <div className="bg-white rounded-[3rem] shadow-xl border border-white p-6 md:p-12 relative overflow-hidden">
+        <div className="bg-white rounded-[3rem] shadow-xl border border-white p-6 md:p-10 relative overflow-hidden mb-8">
             <div className={`absolute top-0 left-0 w-full h-3 bg-gradient-to-r ${isTeacher ? 'from-purple-500 to-pink-500' : 'from-indigo-500 to-blue-500'}`}></div>
             
-            {/* Avatar Section */}
-            <div className="flex flex-col items-center mb-10">
-                <div className={`w-24 h-24 sm:w-32 sm:h-32 rounded-full flex items-center justify-center text-4xl sm:text-5xl font-black text-white shadow-2xl mb-4 border-8 border-white ${isTeacher ? 'bg-purple-600' : 'bg-indigo-600'}`}>
+            <div className="flex flex-col items-center mb-8">
+                <div className={`w-24 h-24 sm:w-28 sm:h-28 rounded-full flex items-center justify-center text-4xl font-black text-white shadow-2xl mb-4 border-8 border-white ${isTeacher ? 'bg-purple-600' : 'bg-indigo-600'}`}>
                     {initials}
                 </div>
                 <div className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${isTeacher ? 'bg-purple-50 text-purple-600 border-purple-100' : 'bg-indigo-50 text-indigo-600 border-indigo-100'}`}>
@@ -100,9 +110,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, playerData, userI
                 </div>
             </div>
 
-            {/* Info Fields */}
-            <div className="space-y-6 mb-10">
-                {/* Name Field */}
+            <div className="space-y-6 mb-8">
                 <div className="space-y-2">
                     <label className="text-xs font-bold text-slate-400 mr-2 uppercase tracking-widest flex items-center gap-2">
                         <User size={14} /> الاسم المعروض
@@ -145,7 +153,6 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, playerData, userI
                     </div>
                 </div>
 
-                {/* Email Field (Read Only) */}
                 <div className="space-y-2">
                     <label className="text-xs font-bold text-slate-400 mr-2 uppercase tracking-widest flex items-center gap-2">
                         <Mail size={14} /> البريد الإلكتروني
@@ -156,7 +163,6 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, playerData, userI
                     </div>
                 </div>
 
-                {/* Teacher Info (For Students Only) */}
                 {!isTeacher && (
                     <div className="space-y-2 animate-fade-in">
                         <label className="text-xs font-bold text-slate-400 mr-2 uppercase tracking-widest flex items-center gap-2">
@@ -172,8 +178,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, playerData, userI
                 )}
             </div>
 
-            {/* Quick Stats Summary */}
-            <div className="grid grid-cols-3 gap-3 mb-4">
+            <div className="grid grid-cols-3 gap-3">
                 <div className="bg-slate-50 p-4 rounded-3xl text-center border border-slate-100">
                     <Star className="mx-auto mb-2 text-yellow-500" size={20} fill="currentColor" />
                     <div className="text-xl font-black text-slate-800">{playerData.totalCorrect}</div>
@@ -190,26 +195,61 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, playerData, userI
                     <div className="text-[9px] font-bold text-slate-400 uppercase">يوم</div>
                 </div>
             </div>
-
-            {/* Status Messages */}
-            <div className="mt-4">
-                {error && (
-                    <div className="flex items-center gap-2 text-red-600 bg-red-50 p-4 rounded-2xl border border-red-100 text-sm font-bold animate-shake">
-                        <AlertCircle size={20} className="shrink-0" />
-                        {error}
-                    </div>
-                )}
-                {success && (
-                    <div className="flex items-center gap-2 text-green-600 bg-green-50 p-4 rounded-2xl border border-green-100 text-sm font-bold animate-pop-in">
-                        <CheckCircle2 size={20} className="shrink-0" />
-                        {success}
-                    </div>
-                )}
-            </div>
         </div>
+
+        {/* Teacher's Students Section (New) */}
+        {isTeacher && (
+            <div className="animate-fade-in">
+                <div className="flex items-center gap-3 mb-4 mr-4">
+                    <div className="bg-purple-600 p-2 rounded-xl text-white shadow-lg">
+                        <Users size={20} />
+                    </div>
+                    <h2 className="text-xl font-black text-slate-800 tracking-tight">قائمة طلاب فصلي</h2>
+                    <span className="bg-purple-100 text-purple-600 px-3 py-1 rounded-full text-xs font-black">
+                        {myStudents.length} {myStudents.length === 1 ? 'بطل' : 'أبطال'}
+                    </span>
+                </div>
+
+                <div className="space-y-3">
+                    {isFetchingStudents ? (
+                        <div className="flex flex-col items-center justify-center p-12 bg-white rounded-[2.5rem] border-2 border-dashed border-slate-200">
+                            <Loader2 size={32} className="text-purple-600 animate-spin mb-3" />
+                            <p className="text-slate-400 font-bold">جاري تحضير قائمة المبدعين...</p>
+                        </div>
+                    ) : myStudents.length > 0 ? (
+                        myStudents.map((student, idx) => (
+                            <div key={student.uid} className="bg-white p-4 rounded-[1.5rem] shadow-sm border border-slate-100 flex items-center justify-between group hover:shadow-md hover:border-purple-200 transition-all animate-fade-in-up" style={{ animationDelay: `${idx * 50}ms` }}>
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 font-black text-xl group-hover:bg-purple-100 group-hover:text-purple-600 transition-colors">
+                                        {student.displayName.substring(0,1)}
+                                    </div>
+                                    <div>
+                                        <h4 className="font-black text-slate-700">{student.displayName}</h4>
+                                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{student.email.split('@')[0]}</p>
+                                    </div>
+                                </div>
+                                <div className="text-left flex items-center gap-4">
+                                    <div className="hidden sm:flex items-center gap-1">
+                                        <Award size={14} className="text-yellow-500" fill="currentColor" />
+                                        <span className="text-xs font-black text-slate-400">{student.badgesCount || 0}</span>
+                                    </div>
+                                    <div className="bg-purple-50 px-4 py-2 rounded-xl text-purple-700 font-black min-w-[60px] text-center">
+                                        {student.totalCorrect}
+                                    </div>
+                                </div>
+                            </div>
+                        ))
+                    ) : (
+                        <div className="text-center p-12 bg-white rounded-[2.5rem] border-2 border-dashed border-slate-200 text-slate-400">
+                            <Users size={48} className="mx-auto mb-3 opacity-20" />
+                            <p className="font-bold">لا يوجد طلاب مسجلون في فصلك بعد.</p>
+                        </div>
+                    )}
+                </div>
+            </div>
+        )}
       </div>
 
-      {/* Confirmation Modal */}
       {showConfirmModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
           <div className="bg-white rounded-[2.5rem] shadow-2xl p-8 max-sm-w-sm w-full text-center border-4 border-indigo-50 animate-pop-in">

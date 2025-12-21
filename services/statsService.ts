@@ -17,7 +17,8 @@ import {
   serverTimestamp,
   DocumentReference,
   Unsubscribe,
-  FirestoreError
+  FirestoreError,
+  arrayUnion
 } from 'firebase/firestore';
 import { 
   getAuth, 
@@ -84,7 +85,6 @@ export const getBadgeDefinitions = (totalCorrect: number): Badge[] => [
 export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile | null> => {
   if (!uid) return null;
   
-  // نحاول جلب بيانات الطالب أولاً مع التقاط أي خطأ في الأذونات
   try {
     const studentSnap = await getDoc(doc(db, USERS_COLLECTION, uid));
     if (studentSnap.exists()) {
@@ -98,10 +98,9 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
       return { ...data, uid: studentSnap.id, teacherId: teacherIdStr, badges: getBadgeDefinitions(data.totalCorrect || 0) } as UserStats;
     }
   } catch (error) {
-    console.debug("Note: User not in Student collection or Permission Denied.");
+    console.debug("Note: User not in Student collection.");
   }
 
-  // إذا لم نجد الطالب أو لم نملك صلاحية، نبحث في المعلمين
   try {
     const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
     const tSnap = await getDocs(q);
@@ -178,10 +177,27 @@ export const fetchTeacherInfo = async (teacherId: string): Promise<TeacherProfil
   return null;
 };
 
+export const fetchTeacherStudents = async (studentRefs: DocumentReference[]): Promise<UserStats[]> => {
+    if (!studentRefs || studentRefs.length === 0) return [];
+    try {
+        const promises = studentRefs.map(ref => getDoc(ref));
+        const snaps = await Promise.all(promises);
+        return snaps
+            .filter(s => s.exists())
+            .map(s => {
+                const data = s.data();
+                return { ...data, uid: s.id } as UserStats;
+            })
+            .sort((a, b) => (b.totalCorrect || 0) - (a.totalCorrect || 0));
+    } catch (error) {
+        console.error("Error fetching teacher students:", error);
+        return [];
+    }
+};
+
 export const subscribeToUserStats = (uid: string, callback: (stats: any) => void): Unsubscribe => {
   let innerUnsubscribe: Unsubscribe | null = null;
   
-  // الاستماع لملف المستخدم (طالب أو معلم)
   const outerUnsubscribe = onSnapshot(doc(db, USERS_COLLECTION, uid), (docSnap) => {
     if (docSnap.exists()) {
       const data = docSnap.data();
@@ -193,7 +209,6 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
       }
       callback({ ...data, uid: docSnap.id, teacherId: teacherIdStr, badges: getBadgeDefinitions(data.totalCorrect || 0) });
     } else {
-        // إذا لم يكن في مجموعة الطلاب، قد يكون معلماً
         if (!innerUnsubscribe) {
             const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
             innerUnsubscribe = onSnapshot(q, (tSnap) => {
@@ -206,7 +221,7 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
         }
     }
   }, (error) => {
-      // إذا حدث خطأ أذونات في مجموعة الطلاب، نجرب مجموعة المعلمين فوراً
+      // Fallback for permissions
       if (!innerUnsubscribe) {
             const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
             innerUnsubscribe = onSnapshot(q, (tSnap) => {
@@ -229,6 +244,7 @@ export const createOrUpdatePlayerProfile = async (uid: string, email: string, di
     const studentRef = doc(db, USERS_COLLECTION, uid);
     try {
       const teacherRef = (teacherId && teacherId !== 'none') ? doc(db, TEACHERS_COLLECTION, teacherId.trim()) : null;
+      
       await setDoc(studentRef, {
           uid, 
           email: email.trim().toLowerCase(), 
@@ -240,8 +256,15 @@ export const createOrUpdatePlayerProfile = async (uid: string, email: string, di
           streak: 0, 
           lastActive: new Date().toISOString(), 
           dailyHistory: {},
-          badgesCount: 0
+          badgesCount: 0,
+          bestSession: 0
       }, { merge: true });
+
+      if (teacherRef) {
+          await updateDoc(teacherRef, {
+              studentRefs: arrayUnion(studentRef)
+          });
+      }
     } catch (e) {
       console.error("Error in createOrUpdatePlayerProfile:", e);
       throw e;
@@ -249,13 +272,10 @@ export const createOrUpdatePlayerProfile = async (uid: string, email: string, di
 };
 
 export const updateUserStats = async (result: GameResult, uid: string, role: UserRole = UserRole.STUDENT) => {
-    const today = getLocalDateString();
-    
+    const todayStr = getLocalDateString();
     try {
-      // تحديد المرجع بناءً على الرتبة
       let userRef;
       if (role === UserRole.TEACHER) {
-          // المعلم قد يكون الـ ID الخاص به مختلفاً عن الـ UID، لذا نحتاج للبحث عنه
           const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
           const snap = await getDocs(q);
           if (snap.empty) return;
@@ -266,22 +286,46 @@ export const updateUserStats = async (result: GameResult, uid: string, role: Use
 
       let snap = await getDoc(userRef);
       if (!snap.exists()) return;
-      // Fix: Cast snap.data() to any to bypass Property 'X' does not exist on type 'unknown' errors.
+      
       const data = snap.data() as any;
       const dailyHistory = data.dailyHistory || {};
-      const todayStats = dailyHistory[today] || { date: today, correct: 0, incorrect: 0 };
+      const todayStats = dailyHistory[todayStr] || { date: todayStr, correct: 0, incorrect: 0 };
+      
       todayStats.correct += result.score;
       todayStats.incorrect += (result.totalQuestions - result.score);
+      
       const totalCorrectNow = (data.totalCorrect || 0) + result.score;
       const badgesCount = getBadgeDefinitions(totalCorrectNow).filter(b => b.unlocked).length;
+      
+      // منطق الـ Streak
+      let newStreak = data.streak || 0;
+      const lastPlayedDate = data.lastPlayedDate;
+      
+      if (lastPlayedDate) {
+          const yesterday = new Date();
+          yesterday.setDate(yesterday.getDate() - 1);
+          const yesterdayStr = getLocalDateString(yesterday);
+          
+          if (lastPlayedDate === yesterdayStr) {
+              newStreak += 1;
+          } else if (lastPlayedDate !== todayStr) {
+              newStreak = 1;
+          }
+      } else {
+          newStreak = 1;
+      }
+
+      const bestSession = Math.max(data.bestSession || 0, result.score);
       
       await updateDoc(userRef, {
           totalCorrect: increment(result.score),
           totalIncorrect: increment(result.totalQuestions - result.score),
           lastActive: new Date().toISOString(),
-          lastPlayedDate: today,
+          lastPlayedDate: todayStr,
           badgesCount: badgesCount,
-          dailyHistory: { ...dailyHistory, [today]: todayStats }
+          streak: newStreak,
+          bestSession: bestSession,
+          dailyHistory: { ...dailyHistory, [todayStr]: todayStats }
       });
     } catch (e) {
       console.error("Error in updateUserStats:", e);

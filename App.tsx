@@ -41,6 +41,7 @@ const App: React.FC = () => {
           userSubRef.current = subscribeToUserStats(user.uid, (data) => {
             if (data) {
               setCurrentUserData(data);
+              setHighScore(data.bestSession || 0);
               setIsAuthChecking(false);
             }
           });
@@ -77,7 +78,15 @@ const App: React.FC = () => {
   const handleEndGame = async (result: GameResult) => {
     setIsSaving(true);
     setGameResult(result);
-    // السماح للمعلم والطالب بحفظ النتائج
+    
+    // التحقق من الرقم القياسي الجديد
+    if (result.score > highScore) {
+        setIsNewHighScore(true);
+        setHighScore(result.score);
+    } else {
+        setIsNewHighScore(false);
+    }
+
     if (currentUser && !currentUser.isAnonymous && currentUserData) {
         try {
             await updateUserStats(result, currentUser.uid, currentUserData.role);

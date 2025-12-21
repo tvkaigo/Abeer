@@ -95,6 +95,7 @@ export interface TeacherProfile {
   dailyHistory: Record<string, DailyStat>;
   badges: Badge[];
   badgesCount: number;
+  studentRefs?: any[]; // مصفوفة مراجع للطلاب المرتبطين Users/{userId}
 }
 
 export interface LeaderboardEntry {
