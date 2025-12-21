@@ -92,8 +92,11 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
             return;
         }
 
-        // ربط الحساب بالـ UID وتفعيل النشاط
-        await activateTeacherAccount(teacherProfile.teacherId, user.uid);
+        // ربط الحساب بالـ UID وتفعيل النشاط إذا لم يكن مرتبطاً مسبقاً
+        if (!teacherProfile.uid) {
+            await activateTeacherAccount(teacherProfile.teacherId, user.uid);
+        }
+        
         onSuccess();
         
       } else if (mode === 'signup') {
@@ -139,7 +142,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
     const code = err.code || '';
     
     if (err.message && (err.message.includes('permission') || err.message.includes('insufficient'))) {
-        msg = "خطأ في أذونات قاعدة البيانات. يرجى تحديث القواعد (Firestore Rules) لتسمح بعمليات التسجيل.";
+        msg = "خطأ في أذونات قاعدة البيانات. يرجى التأكد من ضبط القواعد (Firestore Rules) لتسمح بعمليات التسجيل والربط.";
     } else if (code === 'custom/incorrect-credentials') {
         msg = "البريد الإلكتروني أو كلمة المرور غير صحيحة.";
     } else {
@@ -165,7 +168,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xl">
-      <div className="bg-white rounded-[3rem] shadow-2xl p-8 max-w-md w-full border-4 border-indigo-50 relative overflow-hidden animate-pop-in">
+      <div className="bg-white rounded-[3rem] shadow-2xl p-8 max-md w-full border-4 border-indigo-50 relative overflow-hidden animate-pop-in">
         <div className={`absolute top-0 left-0 w-full h-3 bg-gradient-to-r ${mode === 'teacher' ? 'from-purple-500 to-pink-500' : 'from-indigo-500 to-cyan-500'}`}></div>
         
         <div className="text-center mb-6">

@@ -1,0 +1,37 @@
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ✅ مجموعة المستخدمين (الطلاب) - Users (كبيرة)
+    match /Users/{userId} {
+      // يسمح للمستخدم (الطالب) بالقراءة والكتابة فقط إذا كان صاحب الوثيقة
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // يسمح للمعلم بقراءة بيانات طلابه فقط
+      allow read: if request.auth != null && 
+        resource.data.teacherId != null && 
+        exists(/databases/$(database)/documents/Teachers/$(resource.data.teacherId)) &&
+        get(/databases/$(database)/documents/Teachers/$(resource.data.teacherId)).data.uid == request.auth.uid;
+    }
+    
+    // ✅ مجموعة المعلمين - Teachers (كبيرة)
+    match /Teachers/{teacherId} {
+      // يسمح للجميع بالقراءة (لاختيار المعلم عند التسجيل)
+      allow read: if true;
+      
+      // يسمح بالتحديث في حالتين:
+      // 1. الوثيقة لا تحتوي على UID بعد (التفعيل لأول مرة)
+      // 2. الـ UID المسجل في الوثيقة يطابق الـ UID الخاص بالمستخدم الحالي (المعلم بعد التفعيل)
+      allow update: if request.auth != null && (
+        !('uid' in resource.data) || 
+        resource.data.uid == null || 
+        resource.data.uid == "" ||
+        resource.data.uid == request.auth.uid
+      );
+      
+      // منع الإنشاء أو الحذف من واجهة المستخدم (تتم عبر لوحة الإدارة فقط)
+      allow create, delete: if false;
+    }
+  }
+}

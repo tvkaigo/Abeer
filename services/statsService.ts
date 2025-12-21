@@ -93,8 +93,8 @@ isSupported().then(supported => {
   }
 });
 
-// ملاحظة: تم تغيير USERS_COLLECTION إلى 'users' ليطابق قواعد الحماية الخاصة بك
-const USERS_COLLECTION = 'users'; 
+// ملاحظة: تم التغيير إلى 'Users' (كبيرة) بناءً على طلبك
+const USERS_COLLECTION = 'Users'; 
 const TEACHERS_COLLECTION = 'Teachers'; 
 
 export const loginAnonymously = async () => {
@@ -129,7 +129,7 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
       return { ...data, uid: studentSnap.id, teacherId: teacherIdStr, badges: getBadgeDefinitions(data.totalCorrect || 0) } as UserStats;
     }
   } catch (error) {
-    console.debug("Not found in students collection.");
+    console.debug("Checking teachers collection...");
   }
 
   try {
@@ -177,10 +177,11 @@ export const activateTeacherAccount = async (teacherId: string, uid: string) => 
         const docSnap = await getDoc(teacherRef);
         if (docSnap.exists()) {
             const data = docSnap.data();
-            // إذا كان الحساب مفعلاً بالفعل ومرتبطاً بنفس الـ UID، لا نفعل شيئاً
-            if (data.active && data.uid === uid) return;
+            if (data.active === true && data.uid === uid) {
+                console.log("Teacher account already active.");
+                return;
+            }
             
-            // الربط لأول مرة (يتوافق مع قاعدة allow update: if !resource.data.active)
             await updateDoc(teacherRef, {
                 active: true,
                 uid: uid,
@@ -189,7 +190,7 @@ export const activateTeacherAccount = async (teacherId: string, uid: string) => 
         }
     } catch (error) {
         console.error("Error in activateTeacherAccount:", error);
-        throw new Error("فشل ربط حساب المعلم. يرجى التأكد من أن الحساب لم يتم تفعيله مسبقاً من جهاز آخر.");
+        throw error;
     }
 };
 
@@ -261,7 +262,7 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
     }
   }, (error) => {
       if (error.code !== 'permission-denied') {
-          console.warn("Snapshot notice:", error.message);
+          console.warn("Snapshot error:", error.message);
       }
   });
   
