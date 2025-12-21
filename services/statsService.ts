@@ -68,10 +68,14 @@ export const getBadgeDefinitions = (totalCorrect: number): Badge[] => [
   { id: 4, name: 'الأسطورة', required: 300, icon: '🏆', unlocked: totalCorrect >= 300, color: 'text-yellow-600 bg-yellow-100 border-yellow-200' },
 ];
 
+/**
+ * جلب بيانات المستخدم مع دعم البحث عن المعلم في مسار /Teachers/ بواسطة UID
+ */
 export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile | null> => {
   if (!uid) return null;
   
   try {
+    // 1. البحث في مجموعة الطلاب
     const studentRef = doc(db, USERS_COLLECTION, uid);
     const studentSnap = await getDoc(studentRef);
     if (studentSnap.exists()) {
@@ -91,6 +95,7 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
       } as UserStats;
     }
     
+    // 2. البحث في مجموعة المعلمين /Teachers/ بواسطة حقل UID المربوط
     const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
     const tSnap = await getDocs(q);
     if (!tSnap.empty) {
@@ -103,21 +108,29 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
       } as TeacherProfile;
     }
   } catch (error) {
-    console.error("Error loading stats:", error);
+    console.error("Error loading stats from cloud:", error);
   }
   return null;
 };
 
+/**
+ * التحقق من وجود المعلم بواسطة البريد الإلكتروني في مجموعة /Teachers/
+ */
 export const isTeacherByEmail = async (email: string): Promise<TeacherProfile | null> => {
     if (!email) return null;
     try {
-      const docRef = doc(db, TEACHERS_COLLECTION, email.trim().toLowerCase());
-      const snap = await getDoc(docRef);
-      if (snap.exists() && snap.data()?.active !== false) {
-          return {
-              teacherId: snap.id,
-              ...snap.data()
-          } as TeacherProfile;
+      const q = query(collection(db, TEACHERS_COLLECTION), where("email", "==", email.trim().toLowerCase()), limit(1));
+      const snap = await getDocs(q);
+      
+      if (!snap.empty) {
+          const teacherDoc = snap.docs[0];
+          const data = teacherDoc.data();
+          if (data.active !== false) {
+              return {
+                  teacherId: teacherDoc.id,
+                  ...data
+              } as TeacherProfile;
+          }
       }
       return null;
     } catch (err) {
@@ -126,6 +139,9 @@ export const isTeacherByEmail = async (email: string): Promise<TeacherProfile | 
     }
 };
 
+/**
+ * جلب بيانات معلم معين من المسار /Teachers/{teacherId}
+ */
 export const fetchTeacherInfo = async (teacherId: string): Promise<TeacherProfile | null> => {
   if (!teacherId) return null;
   try {
@@ -142,11 +158,14 @@ export const fetchTeacherInfo = async (teacherId: string): Promise<TeacherProfil
       } as TeacherProfile;
     }
   } catch (error) {
-    console.error("Error fetching teacher info:", error);
+    console.error("Error fetching teacher from path /Teachers/ :", error);
   }
   return null;
 };
 
+/**
+ * جلب جميع المعلمين النشطين من مجموعة /Teachers/
+ */
 export const fetchAllTeachers = async (): Promise<TeacherProfile[]> => {
   try {
     const q = query(collection(db, TEACHERS_COLLECTION), where("active", "==", true));
@@ -156,13 +175,15 @@ export const fetchAllTeachers = async (): Promise<TeacherProfile[]> => {
       teacherId: doc.id 
     })) as any;
   } catch (error) {
-    console.error("Error fetching teachers:", error);
+    console.error("Error fetching teachers list:", error);
     return [];
   }
 };
 
+/**
+ * الاشتراك اللحظي في بيانات المستخدم (طالب أو معلم في مسار /Teachers/)
+ */
 export const subscribeToUserStats = (uid: string, callback: (stats: any) => void) => {
-  // مراقبة وثيقة الطالب
   const unsubStudent = onSnapshot(doc(db, USERS_COLLECTION, uid), (docSnap) => {
     if (docSnap.exists()) {
       const data = docSnap.data();
@@ -179,14 +200,15 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
           badges: getBadgeDefinitions(data.totalCorrect || 0) 
       });
     } else {
-        // إذا لم يكن طالباً، نبحث عنه في مجموعة المعلمين (باستخدام UID المربوط)
+        // إذا لم يكن طالباً، نبحث عنه كمعلم في /Teachers/ بواسطة UID
         const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
-        getDocs(q).then(tSnap => {
+        const unsubTeacher = onSnapshot(q, (tSnap) => {
             if (!tSnap.empty) {
                 const docSnap = tSnap.docs[0];
                 callback({ ...docSnap.data(), teacherId: docSnap.id, role: UserRole.TEACHER });
             }
         });
+        return unsubTeacher;
     }
   });
   

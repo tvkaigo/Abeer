@@ -66,19 +66,19 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
 
     try {
       if (mode === 'teacher') {
-        // 1. تسجيل الدخول أولاً (Auth First) لضمان امتلاك صلاحيات القراءة من Firestore
+        // 1. تسجيل الدخول أولاً للحصول على الصلاحيات
         const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, password);
         
-        // 2. التحقق من وجود المعلم في قاعدة البيانات بعد تسجيل الدخول
+        // 2. البحث عن وثيقة المعلم في /Teachers/ بواسطة البريد الإلكتروني
         const teacherProfile = await isTeacherByEmail(cleanEmail);
         
         if (!teacherProfile) {
-            // إذا لم يكن معلماً، سجل خروجه فوراً
+            // إذا لم يكن معلماً في النظام، سجل خروجه فوراً
             await signOut(auth);
-            throw new Error("عذراً، هذا الحساب ليس له ملف تعريف معلم معتمد.");
+            throw new Error("عذراً، هذا الحساب ليس مسجلاً كمعلم في قاعدة البيانات.");
         }
 
-        // 3. ربط UID الوثيقة (أول مرة أو للتحديث)
+        // 3. ربط معرف الـ Auth بوثيقة المعلم في المسار الصحيح /Teachers/{teacherId}
         const teacherDocRef = doc(db, 'Teachers', teacherProfile.teacherId);
         await updateDoc(teacherDocRef, { 
             uid: userCredential.user.uid, 
@@ -96,7 +96,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
         await updateProfile(userCredential.user, { displayName: nameToSave });
         onSuccess();
       } else {
-        // تسجيل دخول الطالب العادي
+        // تسجيل دخول الطالب
         await signInWithEmailAndPassword(auth, cleanEmail, password);
         onSuccess();
       }
@@ -104,9 +104,9 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
       console.error("Auth Action Error:", err);
       let msg = "حدث خطأ ما، يرجى المحاولة مرة أخرى";
       if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        msg = "بيانات الدخول غير صحيحة. يرجى التأكد من البريد وكلمة المرور الممنوحة لك.";
+        msg = "بيانات الدخول غير صحيحة. يرجى التأكد من البريد وكلمة المرور.";
       } else if (err.code === 'auth/email-already-in-use') {
-        msg = "هذا البريد الإلكتروني مستخدم بالفعل في حساب آخر.";
+        msg = "هذا البريد الإلكتروني مستخدم بالفعل.";
       } else if (err.message) {
         msg = err.message;
       }
@@ -181,7 +181,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
 
           {mode === 'teacher' && (
             <div className="bg-purple-50 text-purple-700 p-4 rounded-2xl text-xs font-bold border border-purple-100">
-              <Info className="inline-block ml-2" size={16} /> استخدم البريد وكلمة المرور المسلمين لك من الإدارة.
+              <Info className="inline-block ml-2" size={16} /> استخدم البريد وكلمة المرور الممنوحة لك في الفصل.
             </div>
           )}
 
