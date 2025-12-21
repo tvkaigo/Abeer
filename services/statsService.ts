@@ -1,6 +1,5 @@
 
 import { initializeApp, getApp, getApps } from 'firebase/app';
-// Exporting modular Firebase app functions
 export { initializeApp, getApp, getApps } from 'firebase/app';
 
 import { 
@@ -23,7 +22,6 @@ import {
   FirestoreError,
   arrayUnion
 } from 'firebase/firestore';
-// Exporting modular Firestore functions and types
 export { 
   getFirestore, 
   doc, 
@@ -55,12 +53,11 @@ import {
   onAuthStateChanged,
   createUserWithEmailAndPassword
 } from 'firebase/auth';
-// Exporting modular Auth functions and types
 export { 
   getAuth, 
   signInWithEmailAndPassword,
   signOut, 
-  setPersistence,
+  setPersistence, 
   browserLocalPersistence,
   updateProfile,
   signInAnonymously,
@@ -70,7 +67,6 @@ export {
 export type { User };
 
 import { getAnalytics, isSupported } from 'firebase/analytics';
-// Exporting modular Analytics functions
 export { getAnalytics, isSupported } from 'firebase/analytics';
 
 import { UserStats, GameResult, LeaderboardEntry, Badge, UserRole, TeacherProfile } from '../types';
@@ -97,7 +93,8 @@ isSupported().then(supported => {
   }
 });
 
-const USERS_COLLECTION = 'Users'; 
+// ملاحظة: تم تغيير USERS_COLLECTION إلى 'users' ليطابق قواعد الحماية الخاصة بك
+const USERS_COLLECTION = 'users'; 
 const TEACHERS_COLLECTION = 'Teachers'; 
 
 export const loginAnonymously = async () => {
@@ -173,21 +170,26 @@ export const isTeacherByEmail = async (email: string): Promise<TeacherProfile | 
 };
 
 export const activateTeacherAccount = async (teacherId: string, uid: string) => {
+    if (!teacherId || !uid) return;
     const teacherRef = doc(db, TEACHERS_COLLECTION, teacherId);
+    
     try {
-        await updateDoc(teacherRef, {
-            active: true,
-            uid: uid,
-            lastActive: new Date().toISOString()
-        });
-    } catch (error) {
-        console.warn("Permission issue during teacher activation, attempting merge...");
-        try {
-            await setDoc(teacherRef, { uid, active: true, lastActive: new Date().toISOString() }, { merge: true });
-        } catch (e) {
-            console.error("Could not link teacher account. Please check Firestore Rules.");
-            throw e;
+        const docSnap = await getDoc(teacherRef);
+        if (docSnap.exists()) {
+            const data = docSnap.data();
+            // إذا كان الحساب مفعلاً بالفعل ومرتبطاً بنفس الـ UID، لا نفعل شيئاً
+            if (data.active && data.uid === uid) return;
+            
+            // الربط لأول مرة (يتوافق مع قاعدة allow update: if !resource.data.active)
+            await updateDoc(teacherRef, {
+                active: true,
+                uid: uid,
+                lastActive: new Date().toISOString()
+            });
         }
+    } catch (error) {
+        console.error("Error in activateTeacherAccount:", error);
+        throw new Error("فشل ربط حساب المعلم. يرجى التأكد من أن الحساب لم يتم تفعيله مسبقاً من جهاز آخر.");
     }
 };
 
@@ -242,7 +244,6 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
       }
       callback({ ...data, uid: docSnap.id, teacherId: teacherIdStr, badges: getBadgeDefinitions(data.totalCorrect || 0) });
     } else {
-        // إذا لم يوجد مستند طالب، نبحث في المعلمين
         if (!innerUnsubscribe) {
             const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
             innerUnsubscribe = onSnapshot(q, (tSnap) => {
@@ -259,8 +260,9 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
         }
     }
   }, (error) => {
-      console.warn("Snapshot error, user doc might not exist yet.");
-      callback(null);
+      if (error.code !== 'permission-denied') {
+          console.warn("Snapshot notice:", error.message);
+      }
   });
   
   return () => {
@@ -270,30 +272,31 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
 };
 
 export const createOrUpdatePlayerProfile = async (uid: string, email: string, displayName: string, teacherId?: string) => {
+    if (!uid) return false;
     const studentRef = doc(db, USERS_COLLECTION, uid);
-    try {
-      const finalTeacherId = (teacherId && teacherId !== 'none') ? teacherId.trim() : '';
-      
-      const profileData = {
-          uid, 
-          email: email.trim().toLowerCase(), 
-          displayName: displayName || 'لاعب جديد', 
-          role: UserRole.STUDENT, 
-          teacherId: finalTeacherId,
-          totalCorrect: 0, 
-          totalIncorrect: 0, 
-          streak: 0, 
-          bestSession: 0,
-          lastActive: new Date().toISOString(), 
-          dailyHistory: {},
-          badgesCount: 0
-      };
+    const finalTeacherId = (teacherId && teacherId !== 'none') ? teacherId.trim() : '';
+    
+    const profileData = {
+        uid, 
+        email: email.trim().toLowerCase(), 
+        displayName: displayName || 'لاعب جديد', 
+        role: UserRole.STUDENT, 
+        teacherId: finalTeacherId,
+        totalCorrect: 0, 
+        totalIncorrect: 0, 
+        streak: 0, 
+        bestSession: 0,
+        lastActive: new Date().toISOString(), 
+        dailyHistory: {},
+        badgesCount: 0
+    };
 
-      await setDoc(studentRef, profileData, { merge: true });
-      return true;
+    try {
+        await setDoc(studentRef, profileData, { merge: true });
+        return true;
     } catch (e) {
-      console.error("Critical Error in createOrUpdatePlayerProfile:", e);
-      throw e;
+        console.error("Firestore write failed:", e);
+        throw e;
     }
 };
 
@@ -322,7 +325,6 @@ export const updateUserStats = async (result: GameResult, uid: string, role: Use
       
       const totalCorrectNow = (data.totalCorrect || 0) + result.score;
       const badgesCount = getBadgeDefinitions(totalCorrectNow).filter(b => b.unlocked).length;
-      
       const bestSession = Math.max(data.bestSession || 0, result.score);
       
       await updateDoc(userRef, {
@@ -361,24 +363,23 @@ export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => v
     });
     callback(students);
   }, (error) => {
-      console.error("Leaderboard subscription error:", error);
       callback([]);
   });
 };
 
 export const updateUserProfileName = async (uid: string, newName: string, role: UserRole, teacherId?: string): Promise<void> => {
     const user = auth.currentUser;
-    if (!user) throw new Error("يجب تسجيل الدخول أولاً");
+    if (!user || user.uid !== uid) throw new Error("يجب تسجيل الدخول بصلاحية صحيحة");
     
     try {
         await updateProfile(user, { displayName: newName });
-        if (role === UserRole.STUDENT) {
-            await setDoc(doc(db, USERS_COLLECTION, uid), { displayName: newName }, { merge: true });
-        } else if (role === UserRole.TEACHER && teacherId) {
-            await setDoc(doc(db, TEACHERS_COLLECTION, teacherId), { displayName: newName }, { merge: true });
-        }
+        const userRef = role === UserRole.STUDENT 
+            ? doc(db, USERS_COLLECTION, uid) 
+            : doc(db, TEACHERS_COLLECTION, teacherId || '');
+            
+        await setDoc(userRef, { displayName: newName }, { merge: true });
     } catch (error) {
-        console.error("Error updating profile name in Firestore:", error);
+        console.error("Error updating profile name:", error);
         throw error;
     }
 };

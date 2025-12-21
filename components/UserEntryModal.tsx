@@ -87,33 +87,43 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
         
         if (!teacherProfile) {
             await auth.signOut();
-            setError("هذا البريد غير مسجل كمعلم في النظام.");
+            setError("عذراً، هذا البريد ليس لمعلم معتمد في نظامنا.");
             setIsLoading(false);
             return;
         }
 
-        if (!teacherProfile.uid || teacherProfile.uid !== user.uid) {
-            await activateTeacherAccount(teacherProfile.teacherId, user.uid);
-        }
+        // ربط الحساب بالـ UID وتفعيل النشاط
+        await activateTeacherAccount(teacherProfile.teacherId, user.uid);
         onSuccess();
+        
       } else if (mode === 'signup') {
         if (!cleanName || !teacherId) {
-            setError("يرجى كتابة اسمك واختيار المعلم.");
+            setError("يرجى كتابة اسمك واختيار المعلم للمتابعة.");
             setIsLoading(false);
             return;
         }
+        
+        // 1. إنشاء حساب في نظام المصادقة
         const userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+        
+        // 2. تحديث الاسم في نظام المصادقة
         await updateProfile(userCredential.user, { displayName: cleanName });
-        // محاولة إنشاء الملف الشخصي مع انتظار النتيجة
+        
+        // 3. إنشاء الملف الشخصي في Firestore والانتظار حتى يكتمل
         try {
-            await createOrUpdatePlayerProfile(userCredential.user.uid, cleanEmail, cleanName, teacherId);
-            onSuccess();
+            const success = await createOrUpdatePlayerProfile(userCredential.user.uid, cleanEmail, cleanName, teacherId);
+            if (success) {
+                onSuccess();
+            } else {
+                throw new Error("فشل تأكيد إنشاء الملف الشخصي");
+            }
         } catch (dbErr: any) {
-            console.error("Firestore Write Error during signup:", dbErr);
-            setError("تم إنشاء الحساب، ولكن فشل إنشاء الملف الشخصي. يرجى التأكد من صلاحيات قاعدة البيانات.");
+            console.error("Firestore Registration Error:", dbErr);
+            setError("حدثت مشكلة في حفظ بياناتك في الفصل. يرجى مراجعة القواعد الأمنية أو المحاولة لاحقاً.");
             setIsLoading(false);
         }
       } else {
+        // تسجيل دخول عادي
         await signInWithEmailAndPassword(auth, cleanEmail, password);
         onSuccess();
       }
@@ -125,27 +135,28 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
   };
 
   const handleAuthError = (err: any) => {
-    let msg = "حدث خطأ في النظام، يرجى المحاولة لاحقاً.";
+    let msg = "خطأ غير متوقع، يرجى المحاولة مرة أخرى.";
     const code = err.code || '';
     
-    if (err.message && err.message.includes('permission')) {
-        msg = "خطأ في صلاحيات الوصول لقاعدة البيانات. يرجى مراجعة الإدارة لتحديث قواعد Firestore.";
+    if (err.message && (err.message.includes('permission') || err.message.includes('insufficient'))) {
+        msg = "خطأ في أذونات قاعدة البيانات. يرجى تحديث القواعد (Firestore Rules) لتسمح بعمليات التسجيل.";
     } else if (code === 'custom/incorrect-credentials') {
-        msg = "البيانات المدخلة غير صحيحة.";
+        msg = "البريد الإلكتروني أو كلمة المرور غير صحيحة.";
     } else {
         switch (code) {
           case 'auth/user-not-found':
           case 'auth/invalid-credential':
+          case 'auth/wrong-password':
             msg = "البيانات المدخلة غير صحيحة.";
             break;
-          case 'auth/wrong-password':
-            msg = "كلمة المرور غير صحيحة.";
-            break;
           case 'auth/email-already-in-use':
-            msg = "هذا البريد مسجل مسبقاً.";
+            msg = "هذا البريد مسجل بالفعل في تطبيقنا.";
             break;
           case 'auth/invalid-email':
-            msg = "صيغة البريد الإلكتروني غير صحيحة.";
+            msg = "يرجى إدخال بريد إلكتروني صالح.";
+            break;
+          case 'auth/weak-password':
+            msg = "كلمة المرور ضعيفة جداً.";
             break;
         }
     }

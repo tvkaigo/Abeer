@@ -22,6 +22,7 @@ const App: React.FC = () => {
   const [currentUserData, setCurrentUserData] = useState<UserStats | TeacherProfile | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
   
   const userSubRef = useRef<null | (() => void)>(null);
   
@@ -35,19 +36,19 @@ const App: React.FC = () => {
       }
 
       if (user && !user.isAnonymous) {
-        setIsAuthChecking(true);
-        // الاشتراك في البيانات مع ضمان عدم التعليق
+        setIsInitialLoading(true);
         userSubRef.current = subscribeToUserStats(user.uid, (data) => {
-          if (data) {
-            setCurrentUserData(data);
-            setHighScore(data.bestSession || 0);
-          } else {
-            setCurrentUserData(null);
-          }
+          setCurrentUserData(data);
+          if (data) setHighScore(data.bestSession || 0);
+          setIsInitialLoading(false);
           setIsAuthChecking(false);
         });
+        
+        // Timeout safeguard for initial loading
+        setTimeout(() => setIsInitialLoading(false), 5000);
       } else {
         setCurrentUserData(null);
+        setIsInitialLoading(false);
         setIsAuthChecking(false);
       }
     });
@@ -95,22 +96,27 @@ const App: React.FC = () => {
 
   const handleRestart = () => setAppState(AppState.WELCOME);
 
-  if (isAuthChecking) return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-indigo-50 font-bold text-indigo-600 gap-6 text-center p-4">
-      <div className="relative">
-        <div className="w-16 h-16 border-4 border-indigo-200 rounded-full"></div>
-        <div className="w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin absolute top-0"></div>
+  if (isAuthChecking || (currentUser && !currentUser.isAnonymous && isInitialLoading && !currentUserData)) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-indigo-50 font-bold text-indigo-600 gap-6 text-center p-4">
+        <div className="relative">
+          <div className="w-16 h-16 border-4 border-indigo-200 rounded-full"></div>
+          <div className="w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin absolute top-0"></div>
+        </div>
+        <p className="text-xl animate-pulse">جاري تحضير فصل الأبطال...</p>
       </div>
-      <p className="text-xl animate-pulse">جاري تحضير فصل الأبطال...</p>
-    </div>
-  );
+    );
+  }
 
-  const isRealUserAndHasProfile = currentUser && !currentUser.isAnonymous && currentUserData;
+  const needsProfileCreation = currentUser && !currentUser.isAnonymous && !currentUserData;
 
   return (
     <div className="min-h-screen text-slate-800 font-sans">
-      {!isRealUserAndHasProfile && <UserEntryModal onSuccess={() => {}} />}
-      {isRealUserAndHasProfile && (
+      {(needsProfileCreation || !currentUser || currentUser.isAnonymous) && (
+        <UserEntryModal onSuccess={() => {}} />
+      )}
+      
+      {currentUser && !currentUser.isAnonymous && currentUserData && (
         <>
             {appState === AppState.WELCOME && (
                 <WelcomeScreen 
