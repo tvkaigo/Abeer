@@ -16,7 +16,8 @@ import {
   limit,
   serverTimestamp,
   DocumentReference,
-  Unsubscribe
+  Unsubscribe,
+  FirestoreError
 } from 'firebase/firestore';
 import { 
   getAuth, 
@@ -88,6 +89,7 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
       return { ...data, uid: studentSnap.id, teacherId: teacherIdStr, badges: getBadgeDefinitions(data.totalCorrect || 0) } as UserStats;
     }
     
+    // محاولة البحث عن المعلم - نستخدم استعلام محدد
     const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
     const tSnap = await getDocs(q);
     if (!tSnap.empty) {
@@ -95,7 +97,7 @@ export const loadStats = async (uid: string): Promise<UserStats | TeacherProfile
       return { ...docSnap.data(), teacherId: docSnap.id, role: UserRole.TEACHER } as TeacherProfile;
     }
   } catch (error) {
-    console.error("Error loading stats:", error);
+    console.warn("LoadStats: Permission or Fetch Error", error);
   }
   return null;
 };
@@ -114,7 +116,7 @@ export const isTeacherByEmail = async (email: string): Promise<TeacherProfile | 
       }
       return null;
     } catch (err) {
-      console.error("isTeacherByEmail Error:", err);
+      console.warn("isTeacherByEmail Error: This might be expected for students.", err);
       return null;
     }
 };
@@ -147,11 +149,12 @@ export const fetchTeacherInfo = async (teacherId: string): Promise<TeacherProfil
 };
 
 /**
- * دالة اشتراك محسنة تدعم الطالب والمعلم مع إلغاء اشتراك نظيف
+ * دالة اشتراك محسنة مع معالجة أخطاء الصلاحيات
  */
 export const subscribeToUserStats = (uid: string, callback: (stats: any) => void): Unsubscribe => {
   let innerUnsubscribe: Unsubscribe | null = null;
 
+  // نحاول أولاً الاشتراك كطالب
   const outerUnsubscribe = onSnapshot(doc(db, USERS_COLLECTION, uid), (docSnap) => {
     if (docSnap.exists()) {
       const data = docSnap.data();
@@ -163,15 +166,24 @@ export const subscribeToUserStats = (uid: string, callback: (stats: any) => void
       }
       callback({ ...data, uid: docSnap.id, teacherId: teacherIdStr, badges: getBadgeDefinitions(data.totalCorrect || 0) });
     } else {
-        // إذا لم يكن طالباً، نبحث عنه كمعلم
-        const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
-        innerUnsubscribe = onSnapshot(q, (tSnap) => {
-            if (!tSnap.empty) {
-                const docSnap = tSnap.docs[0];
-                callback({ ...docSnap.data(), teacherId: docSnap.id, role: UserRole.TEACHER });
-            }
-        });
+        // إذا لم يكن طالباً، نحاول البحث كمعلم (فقط إذا لم يكن هناك اشتراك داخلي بالفعل)
+        if (!innerUnsubscribe) {
+            const q = query(collection(db, TEACHERS_COLLECTION), where("uid", "==", uid), limit(1));
+            innerUnsubscribe = onSnapshot(q, (tSnap) => {
+                if (!tSnap.empty) {
+                    const tDocSnap = tSnap.docs[0];
+                    callback({ ...tDocSnap.data(), teacherId: tDocSnap.id, role: UserRole.TEACHER });
+                }
+            }, (error: FirestoreError) => {
+                // غالباً الطالب لا يملك صلاحية Query على مجموعة المعلمين
+                if (error.code !== 'permission-denied') {
+                    console.error("Teacher Sub Error:", error);
+                }
+            });
+        }
     }
+  }, (error: FirestoreError) => {
+      console.error("Student Sub Error:", error);
   });
   
   return () => {
@@ -260,6 +272,11 @@ export const subscribeToLeaderboard = (callback: (data: LeaderboardEntry[]) => v
       });
     });
     callback(students);
+  }, (error) => {
+      if (error.code !== 'permission-denied') {
+          console.error("Leaderboard Snapshot Error:", error);
+      }
+      callback([]);
   });
 };
 

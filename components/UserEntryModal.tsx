@@ -17,7 +17,6 @@ interface UserEntryModalProps {
 
 const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
   const [mode, setMode] = useState<'login' | 'signup' | 'teacher'>('login');
-  const [step, setStep] = useState(1); // مرحلة التسجيل (1 للحساب، 2 لاختيار المعلم)
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -28,18 +27,22 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
   const [isFetchingTeachers, setIsFetchingTeachers] = useState(false);
 
   useEffect(() => {
-    // جلب المعلمين فقط في المرحلة الثانية من التسجيل لضمان وجود Auth
-    if (mode === 'signup' && step === 2) {
+    // جلب قائمة المعلمين فور اختيار وضع التسجيل
+    if (mode === 'signup') {
         setIsFetchingTeachers(true);
         fetchAllTeachers().then(list => {
-            setTeachers(list.sort((a, b) => a.displayName.localeCompare(b.displayName, 'ar')));
+            const sorted = list.sort((a, b) => a.displayName.localeCompare(b.displayName, 'ar'));
+            setTeachers(sorted);
             setIsFetchingTeachers(false);
-        }).catch(() => {
-            setError("فشل جلب قائمة المعلمين. يرجى المحاولة لاحقاً.");
+        }).catch((err) => {
+            console.error("Error fetching teachers:", err);
+            setError("فشل تحميل قائمة المعلمين. قد تحتاج لتحديث الصفحة.");
             setIsFetchingTeachers(false);
         });
+    } else {
+        setError('');
     }
-  }, [mode, step]);
+  }, [mode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,8 +50,16 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
     setError('');
 
     const cleanEmail = email.trim().toLowerCase();
+    const cleanName = displayName.trim();
+
+    // التحقق من البيانات الأساسية
     if (password.length < 6) {
         setError("كلمة المرور يجب ألا تقل عن 6 أحرف");
+        return;
+    }
+
+    if (mode === 'signup' && (!cleanName || !teacherId)) {
+        setError("يرجى إكمال جميع الحقول واختيار المعلم");
         return;
     }
 
@@ -56,6 +67,7 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
 
     try {
       if (mode === 'teacher') {
+        // دخول المعلم
         const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, password);
         const teacherProfile = await isTeacherByEmail(cleanEmail);
         if (!teacherProfile) {
@@ -68,31 +80,34 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
         });
         onSuccess();
       } else if (mode === 'signup') {
-        if (step === 1) {
-            // المرحلة 1: إنشاء الحساب في Auth
-            const userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
-            await updateProfile(userCredential.user, { displayName: displayName.trim() });
-            setStep(2); // الانتقال لاختيار المعلم
-        } else {
-            // المرحلة 2: اختيار المعلم وربط الملف
-            const user = auth.currentUser;
-            if (!user) throw new Error("جلسة العمل انتهت، يرجى تسجيل الدخول");
-            if (!teacherId) throw new Error("يرجى اختيار معلمك");
-            await createOrUpdatePlayerProfile(user.uid, cleanEmail, displayName.trim(), teacherId);
-            onSuccess();
-        }
+        // إنشاء حساب طالب جديد (عملية واحدة)
+        const userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+        await updateProfile(userCredential.user, { displayName: cleanName });
+        // ربط المعلم وحفظ البيانات في Firestore
+        await createOrUpdatePlayerProfile(userCredential.user.uid, cleanEmail, cleanName, teacherId);
+        onSuccess();
       } else {
+        // تسجيل دخول طالب موجود
         await signInWithEmailAndPassword(auth, cleanEmail, password);
         onSuccess();
       }
     } catch (err: any) {
       console.error("Auth Error:", err);
-      let msg = err.message || "حدث خطأ غير متوقع";
+      let msg = "حدث خطأ غير متوقع. يرجى المحاولة ثانية.";
+      
       if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
         msg = "بيانات الدخول غير صحيحة.";
       } else if (err.code === 'auth/email-already-in-use') {
-        msg = "هذا البريد الإلكتروني مستخدم بالفعل.";
+        msg = "هذا البريد الإلكتروني مسجل مسبقاً.";
+      } else if (err.message) {
+        msg = err.message;
       }
+      
+      // في حال وجود خطأ في الصلاحيات أثناء التسجيل (قواعد Firestore)
+      if (err.message && err.message.includes('permissions')) {
+          msg = "حدث خطأ أثناء حفظ بياناتك. يرجى إبلاغ المعلم.";
+      }
+      
       setError(msg);
     } finally {
       setIsLoading(false);
@@ -112,62 +127,62 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
              {mode === 'teacher' ? 'بوابة المعلم' : 'العبقري الصغير'}
           </h2>
           <p className="text-slate-500 mt-2 font-medium">
-            {mode === 'signup' && step === 2 ? 'خطوة واحدة أخيرة لنبدأ!' : 'مرحباً بك في عالم الرياضيات الممتع'}
+            {mode === 'login' ? 'مرحباً بعودتك يا بطل!' : mode === 'signup' ? 'سجل الآن لتنضم لعالم الأبطال' : 'بوابة تسجيل المعلمين'}
           </p>
         </div>
 
-        {step === 1 && (
-            <div className="flex bg-slate-100 p-1.5 rounded-2xl mb-8">
-                <button onClick={() => setMode('login')} className={`flex-1 py-3 rounded-xl font-bold transition-all text-sm ${mode === 'login' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>دخول</button>
-                <button onClick={() => setMode('signup')} className={`flex-1 py-3 rounded-xl font-bold transition-all text-sm ${mode === 'signup' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>تسجيل</button>
-                <button onClick={() => setMode('teacher')} className={`flex-1 py-3 rounded-xl font-bold transition-all text-sm ${mode === 'teacher' ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-500'}`}>معلم</button>
-            </div>
-        )}
+        <div className="flex bg-slate-100 p-1.5 rounded-2xl mb-8">
+            <button onClick={() => setMode('login')} className={`flex-1 py-3 rounded-xl font-bold transition-all text-sm ${mode === 'login' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>دخول</button>
+            <button onClick={() => setMode('signup')} className={`flex-1 py-3 rounded-xl font-bold transition-all text-sm ${mode === 'signup' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>تسجيل</button>
+            <button onClick={() => setMode('teacher')} className={`flex-1 py-3 rounded-xl font-bold transition-all text-sm ${mode === 'teacher' ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-500'}`}>معلم</button>
+        </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          {mode === 'signup' && step === 1 && (
-            <div>
-                <label className="block text-slate-700 font-bold mb-2 text-sm">اسم البطل (بالعربية)</label>
-                <div className="relative">
-                <input type="text" required value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="مثال: أحمد محمد" className="w-full px-4 py-4 rounded-2xl border-2 border-slate-100 focus:border-indigo-500 outline-none pr-12 bg-slate-50 font-bold" />
-                <User className="absolute right-4 top-4 text-slate-400" size={20} />
-                </div>
-            </div>
-          )}
-
-          {mode === 'signup' && step === 2 && (
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {mode === 'signup' && (
             <div className="animate-fade-in-up">
-                <label className="block text-slate-700 font-bold mb-2 text-sm">اختر معلم فصلك</label>
+                <label className="block text-slate-700 font-bold mb-1.5 text-xs mr-2">اسم البطل (بالعربية)</label>
                 <div className="relative">
-                <select required value={teacherId} onChange={(e) => setTeacherId(e.target.value)} className="w-full px-4 py-4 rounded-2xl border-2 border-slate-100 focus:border-indigo-500 outline-none pr-12 bg-slate-50 font-bold appearance-none">
-                    <option value="">{isFetchingTeachers ? 'جاري التحميل...' : '-- اختر المعلم --'}</option>
-                    {teachers.map(t => <option key={t.teacherId} value={t.teacherId}>{t.displayName}</option>)}
-                </select>
-                <UserCheck className="absolute right-4 top-4 text-slate-400 pointer-events-none" size={20} />
-                <ChevronDown className="absolute left-4 top-4 text-slate-400 pointer-events-none" size={20} />
+                    <input type="text" required value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="مثال: سارة أحمد" className="w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 focus:border-indigo-500 outline-none pr-12 bg-slate-50 font-bold" />
+                    <User className="absolute right-4 top-3.5 text-slate-400" size={20} />
                 </div>
-                <p className="text-[10px] text-indigo-500 mt-2 font-bold px-2">يجب اختيار المعلم لتتمكن من المنافسة في قائمة المتصدرين.</p>
             </div>
           )}
 
-          {step === 1 && (
-            <>
-                <div>
-                    <label className="block text-slate-700 font-bold mb-2 text-sm">البريد الإلكتروني</label>
-                    <div className="relative">
-                    <input type="email" required dir="ltr" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" className="w-full px-4 py-4 rounded-2xl border-2 border-slate-100 focus:border-indigo-500 outline-none pr-12 bg-slate-50 text-right font-medium" />
-                    <Mail className="absolute right-4 top-4 text-slate-400" size={20} />
-                    </div>
-                </div>
+          <div>
+            <label className="block text-slate-700 font-bold mb-1.5 text-xs mr-2">البريد الإلكتروني</label>
+            <div className="relative">
+              <input type="email" required dir="ltr" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" className="w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 focus:border-indigo-500 outline-none pr-12 bg-slate-50 text-right font-medium" />
+              <Mail className="absolute right-4 top-3.5 text-slate-400" size={20} />
+            </div>
+          </div>
 
-                <div>
-                    <label className="block text-slate-700 font-bold mb-2 text-sm">كلمة المرور</label>
-                    <div className="relative">
-                    <input type="password" required dir="ltr" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" className="w-full px-4 py-4 rounded-2xl border-2 border-slate-100 focus:border-indigo-500 outline-none pr-12 bg-slate-50 text-right" />
-                    <Lock className="absolute right-4 top-4 text-slate-400" size={20} />
-                    </div>
+          <div>
+            <label className="block text-slate-700 font-bold mb-1.5 text-xs mr-2">كلمة المرور</label>
+            <div className="relative">
+              <input type="password" required dir="ltr" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" className="w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 focus:border-indigo-500 outline-none pr-12 bg-slate-50 text-right" />
+              <Lock className="absolute right-4 top-3.5 text-slate-400" size={20} />
+            </div>
+          </div>
+
+          {mode === 'signup' && (
+            <div className="animate-fade-in-up">
+                <label className="block text-slate-700 font-bold mb-1.5 text-xs mr-2">اختر معلم فصلك</label>
+                <div className="relative">
+                    <select required value={teacherId} onChange={(e) => setTeacherId(e.target.value)} className="w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 focus:border-indigo-500 outline-none pr-12 bg-slate-50 font-bold appearance-none">
+                        <option value="">{isFetchingTeachers ? 'جاري تحميل المعلمين...' : '-- اختر المعلم --'}</option>
+                        {teachers.map(t => <option key={t.teacherId} value={t.teacherId}>{t.displayName}</option>)}
+                    </select>
+                    <UserCheck className="absolute right-4 top-3.5 text-slate-400 pointer-events-none" size={20} />
+                    <ChevronDown className="absolute left-4 top-3.5 text-slate-400 pointer-events-none" size={20} />
                 </div>
-            </>
+            </div>
+          )}
+
+          {mode === 'teacher' && (
+            <div className="bg-purple-50 text-purple-700 p-4 rounded-2xl text-xs font-bold border border-purple-100 flex items-start gap-2">
+              <Info className="shrink-0 mt-0.5" size={14} /> 
+              <span>هذه البوابة مخصصة فقط للمعلمين المسجلين مسبقاً من قِبل الإدارة.</span>
+            </div>
           )}
 
           {error && (
@@ -177,9 +192,8 @@ const UserEntryModal: React.FC<UserEntryModalProps> = ({ onSuccess }) => {
             </div>
           )}
 
-          <button type="submit" disabled={isLoading || (step === 2 && isFetchingTeachers)} className={`w-full text-white font-black py-4 rounded-2xl shadow-xl transition-all flex items-center justify-center gap-2 mt-4 disabled:opacity-50 ${mode === 'teacher' ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-200' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'}`}>
+          <button type="submit" disabled={isLoading || (mode === 'signup' && isFetchingTeachers)} className={`w-full text-white font-black py-4 rounded-2xl shadow-xl transition-all flex items-center justify-center gap-2 mt-4 disabled:opacity-50 ${mode === 'teacher' ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-200' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'}`}>
             {isLoading ? <Loader2 className="animate-spin" size={24} /> : 
-             step === 2 ? 'إكمال التسجيل والدخول' : 
              mode === 'signup' ? 'إنشاء حساب جديد' : 
              mode === 'teacher' ? 'دخول المعلم' : 'انطلق الآن'}
             <LogIn size={20} className="rotate-180" />
